@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # 后端服务
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: switch_manage_backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - .:/app
+    environment:
+      - DATABASE_URL=mysql://admin:password@db:3306/switch_manage
+      - OXIDIZED_URL=http://oxidized:8888
+    depends_on:
+      - db
+      - oxidized
+    networks:
+      - switch_manage_network
+
+  # 前端服务
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile.frontend
+    container_name: switch_manage_frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - switch_manage_network
+
+  # MySQL数据库
+  db:
+    image: mysql:5.7
+    container_name: switch_manage_db
+    ports:
+      - "3306:3306"
+    environment:
+      - MYSQL_ROOT_PASSWORD=password
+      - MYSQL_DATABASE=switch_manage
+      - MYSQL_USER=admin
+      - MYSQL_PASSWORD=password
+    volumes:
+      - mysql_data:/var/lib/mysql
+    networks:
+      - switch_manage_network
+
+  # Oxidized服务
+  oxidized:
+    image: oxidized/oxidized:latest
+    container_name: switch_manage_oxidized
+    ports:
+      - "8888:8888"
+    volumes:
+      - oxidized_config:/root/.config/oxidized
+      - oxidized_data:/root/.config/oxidized/data
+    environment:
+      - OXIDIZED_REPO_URI=/root/.config/oxidized/data
+      - OXIDIZED_REPO_SSH_KEY=/root/.config/oxidized/id_rsa
+    networks:
+      - switch_manage_network
+
+volumes:
+  mysql_data:
+  oxidized_config:
+  oxidized_data:
+
+networks:
+  switch_manage_network:
+    driver: bridge
