@@ -2,7 +2,7 @@
 数据验证模式
 定义API请求和响应的数据结构
 """
-from pydantic import BaseModel, Field, validator
+from pydantic import BaseModel, Field, field_validator, ConfigDict, Json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
@@ -32,7 +32,8 @@ class DeviceBase(BaseModel):
     password: Optional[str] = Field(None, description="登录密码")
     sn: Optional[str] = Field(None, description="设备序列号")
 
-    @validator('ip_address')
+    @field_validator('ip_address')
+    @classmethod
     def validate_ip_address(cls, v):
         """验证IP地址格式"""
         import ipaddress
@@ -42,14 +43,16 @@ class DeviceBase(BaseModel):
         except ValueError:
             raise ValueError('Invalid IP address format')
 
-    @validator('login_method')
+    @field_validator('login_method')
+    @classmethod
     def validate_login_method(cls, v):
         """验证登录方式"""
         if v not in ['ssh', 'telnet']:
             raise ValueError('Login method must be either ssh or telnet')
         return v
 
-    @validator('status')
+    @field_validator('status')
+    @classmethod
     def validate_status(cls, v):
         """验证设备状态"""
         if v not in ['active', 'inactive', 'maintenance']:
@@ -82,11 +85,10 @@ class DeviceUpdate(BaseModel):
 class Device(DeviceBase):
     """设备模型"""
     id: int = Field(..., description="设备ID")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # 端口相关模型
@@ -98,7 +100,8 @@ class PortBase(BaseModel):
     description: Optional[str] = Field(None, description="端口描述")
     vlan_id: Optional[int] = Field(None, description="VLAN ID")
 
-    @validator('status')
+    @field_validator('status')
+    @classmethod
     def validate_status(cls, v):
         """验证端口状态"""
         if v not in ['up', 'down', 'disabled']:
@@ -124,11 +127,10 @@ class Port(PortBase):
     """端口模型"""
     id: int = Field(..., description="端口ID")
     device_id: int = Field(..., description="设备ID")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # VLAN相关模型
@@ -153,11 +155,10 @@ class VLAN(VLANBase):
     """VLAN模型"""
     id: int = Field(..., description="VLAN ID")
     device_id: int = Field(..., description="设备ID")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # 巡检相关模型
@@ -179,11 +180,10 @@ class InspectionCreate(InspectionBase):
 class Inspection(InspectionBase):
     """巡检模型"""
     id: int = Field(..., description="巡检ID")
-    inspection_time: datetime = Field(..., description="巡检时间")
-    created_at: datetime = Field(..., description="创建时间")
+    inspection_time: Optional[datetime] = Field(None, description="巡检时间")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # 配置相关模型
@@ -191,7 +191,7 @@ class ConfigurationBase(BaseModel):
     """配置基础模型"""
     device_id: int = Field(..., description="设备ID")
     config_content: Optional[str] = Field(None, description="配置内容")
-    config_time: datetime = Field(..., description="配置时间")
+    config_time: Optional[datetime] = Field(None, description="配置时间")
 
 
 class ConfigurationCreate(ConfigurationBase):
@@ -202,10 +202,9 @@ class ConfigurationCreate(ConfigurationBase):
 class Configuration(ConfigurationBase):
     """配置模型"""
     id: int = Field(..., description="配置ID")
-    created_at: datetime = Field(..., description="创建时间")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # MAC地址相关模型
@@ -215,9 +214,10 @@ class MACAddressBase(BaseModel):
     vlan_id: Optional[int] = Field(None, description="VLAN ID")
     interface: str = Field(..., description="学习接口")
     address_type: str = Field("dynamic", description="地址类型")
-    last_seen: datetime = Field(..., description="最后发现时间")
+    last_seen: Optional[datetime] = Field(None, description="最后发现时间")
 
-    @validator('mac_address')
+    @field_validator('mac_address')
+    @classmethod
     def validate_mac_address(cls, v):
         """验证MAC地址格式"""
         import re
@@ -228,7 +228,8 @@ class MACAddressBase(BaseModel):
             raise ValueError('Invalid MAC address format')
         return v
 
-    @validator('address_type')
+    @field_validator('address_type')
+    @classmethod
     def validate_address_type(cls, v):
         """验证地址类型"""
         if v not in ['static', 'dynamic']:
@@ -245,11 +246,10 @@ class MACAddress(MACAddressBase):
     """MAC地址模型"""
     id: int = Field(..., description="MAC地址ID")
     device_id: int = Field(..., description="设备ID")
-    created_at: datetime = Field(..., description="创建时间")
-    updated_at: datetime = Field(..., description="更新时间")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # 设备版本信息相关模型
@@ -260,7 +260,7 @@ class DeviceVersionBase(BaseModel):
     boot_version: Optional[str] = Field(None, description="启动版本")
     system_image: Optional[str] = Field(None, description="系统镜像")
     uptime: Optional[str] = Field(None, description="运行时间")
-    collected_at: datetime = Field(..., description="采集时间")
+    collected_at: Optional[datetime] = Field(None, description="采集时间")
 
 
 class DeviceVersionCreate(DeviceVersionBase):
@@ -272,10 +272,9 @@ class DeviceVersion(DeviceVersionBase):
     """设备版本信息模型"""
     id: int = Field(..., description="版本信息ID")
     device_id: int = Field(..., description="设备ID")
-    created_at: datetime = Field(..., description="创建时间")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
 
-    class Config:
-        from_attributes = True
+    model_config = ConfigDict(from_attributes=True)
 
 
 # 批量操作相关模型
@@ -305,12 +304,13 @@ class DeviceCollectionRequest(BaseModel):
     """设备信息采集请求模型"""
     device_ids: List[int] = Field(..., description="设备ID列表")
     collect_types: List[str] = Field(
-        ..., 
+        ...,
         description="采集类型列表",
-        example=["version", "serial", "interfaces", "mac_table"]
+        json_schema_extra={"example": ["version", "serial", "interfaces", "mac_table"]}
     )
 
-    @validator('collect_types')
+    @field_validator('collect_types')
+    @classmethod
     def validate_collect_types(cls, v):
         """验证采集类型"""
         valid_types = ['version', 'serial', 'interfaces', 'mac_table']

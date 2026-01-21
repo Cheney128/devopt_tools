@@ -2,9 +2,9 @@
 import { ref } from 'vue'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
-import { 
-  Home as HomeIcon,
-  Server as ServerIcon,
+import {
+  HomeFilled as HomeIcon,
+  Cpu as ServerIcon,
   Connection as ConnectionIcon,
   Grid as GridIcon,
   DataAnalysis as DataAnalysisIcon,

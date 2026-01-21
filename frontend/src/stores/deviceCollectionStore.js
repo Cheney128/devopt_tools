@@ -183,24 +183,24 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   // 一键采集所有信息
   const collectAllInfo = async (deviceId) => {
     const results = []
-    
+
     try {
       // 采集版本信息
       const versionResult = await collectVersion(deviceId)
       results.push({ type: 'version', result: versionResult })
-      
+
       // 采集序列号
       const serialResult = await collectSerial(deviceId)
       results.push({ type: 'serial', result: serialResult })
-      
+
       // 采集接口信息
       const interfacesResult = await collectInterfaces(deviceId)
       results.push({ type: 'interfaces', result: interfacesResult })
-      
+
       // 采集MAC地址表
       const macTableResult = await collectMacTable(deviceId)
       results.push({ type: 'mac_table', result: macTableResult })
-      
+
       return {
         success: results.every(r => r.result.success),
         results,
@@ -221,26 +221,26 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
       throw new Error('没有MAC地址数据可导出')
     }
 
-    const csvContent = macTableData.value.map(item => 
+    const csvContent = macTableData.value.map(item =>
       `${item.mac_address},${item.vlan_id || ''},${item.interface},${item.address_type},${item.last_seen}`
     ).join('\n')
-    
+
     const blob = new Blob(
-      [`MAC地址,VLAN ID,接口,类型,最后发现时间\n${csvContent}`], 
+      [`MAC地址,VLAN ID,接口,类型,最后发现时间\n${csvContent}`],
       { type: 'text/csv;charset=utf-8;' }
     )
-    
+
     const link = document.createElement('a')
     link.href = URL.createObjectURL(blob)
-    
+
     const timestamp = new Date().toISOString().slice(0, 10)
-    const defaultFilename = currentDeviceId.value 
+    const defaultFilename = currentDeviceId.value
       ? `mac_table_device_${currentDeviceId.value}_${timestamp}.csv`
       : `mac_table_all_${timestamp}.csv`
-    
+
     link.download = filename || defaultFilename
     link.click()
-    
+
     URL.revokeObjectURL(link.href)
   }
 
@@ -250,12 +250,12 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
     collectionResults,
     macTableData,
     currentDeviceId,
-    
+
     // 计算属性
     isLoading,
     hasResults,
     hasMacData,
-    
+
     // 方法
     addResult,
     clearResults,

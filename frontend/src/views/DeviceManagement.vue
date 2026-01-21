@@ -21,7 +21,12 @@ const vendorOptions = [
   { label: '中兴', value: 'ZTE' }
 ]
 
-// 响应式数据
+// 登录方式选项
+const loginMethodOptions = [
+  { label: 'SSH', value: 'ssh' },
+  { label: 'Telnet', value: 'telnet' },
+  { label: 'Console', value: 'console' }
+]
 const deviceStore = useDeviceStore()
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -34,7 +39,12 @@ const form = ref({
   os_version: '',
   location: '',
   contact: '',
-  status: 'active'
+  status: 'active',
+  login_method: 'ssh',
+  login_port: 22,
+  username: '',
+  password: '',
+  sn: ''
 })
 const formRules = ref({
   hostname: [{ required: true, message: '请输入主机名', trigger: 'blur' }],
@@ -87,7 +97,12 @@ const handleAddDevice = () => {
     os_version: '',
     location: '',
     contact: '',
-    status: 'active'
+    status: 'active',
+    login_method: 'ssh',
+    login_port: 22,
+    username: '',
+    password: '',
+    sn: ''
   }
   currentDeviceId.value = null
   dialogVisible.value = true
@@ -95,7 +110,10 @@ const handleAddDevice = () => {
 
 const handleEditDevice = (device) => {
   dialogTitle.value = '编辑设备'
-  form.value = { ...device }
+  form.value = { 
+    ...device,
+    password: '' // 清空密码字段，只允许编辑，不显示当前密码
+  }
   currentDeviceId.value = device.id
   dialogVisible.value = true
 }
@@ -175,9 +193,15 @@ const handleBatchUpdateStatus = async (status) => {
 const handleSubmit = async () => {
   try {
     loading.value = true
+    // 处理表单数据，只在密码不为空时传递password字段
+    const deviceData = { ...form.value }
+    if (!deviceData.password) {
+      delete deviceData.password
+    }
+    
     if (currentDeviceId.value) {
       // 编辑设备
-      const updatedDevice = await deviceStore.updateDevice(currentDeviceId.value, form.value)
+      const updatedDevice = await deviceStore.updateDevice(currentDeviceId.value, deviceData)
       if (updatedDevice) {
         ElMessage.success('更新成功')
         dialogVisible.value = false
@@ -185,8 +209,8 @@ const handleSubmit = async () => {
         ElMessage.error('更新失败')
       }
     } else {
-      // 添���设备
-      const newDevice = await deviceStore.createDevice(form.value)
+      // 添加设备
+      const newDevice = await deviceStore.createDevice(deviceData)
       if (newDevice) {
         ElMessage.success('添加成功')
         dialogVisible.value = false
@@ -366,6 +390,28 @@ onMounted(() => {
               :value="option.value"
             />
           </el-select>
+        </el-form-item>
+        <el-form-item label="登录方式">
+          <el-select v-model="form.login_method" placeholder="请选择登录方式">
+            <el-option
+              v-for="option in loginMethodOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="登录端口">
+          <el-input-number v-model="form.login_port" :min="1" :max="65535" placeholder="请输入登录端口" />
+        </el-form-item>
+        <el-form-item label="用户名">
+          <el-input v-model="form.username" placeholder="请输入用户名" />
+        </el-form-item>
+        <el-form-item label="密码">
+          <el-input v-model="form.password" type="password" placeholder="请输入密码（不修改请留空）" show-password />
+        </el-form-item>
+        <el-form-item label="设备序列号">
+          <el-input v-model="form.sn" placeholder="请输入设备序列号" />
         </el-form-item>
       </el-form>
       <template #footer>

@@ -98,9 +98,9 @@
                 <div class="action-content">
                   <h4>MAC地址表</h4>
                   <p>采集设备MAC地址表</p>
-                  <el-button 
-                    type="primary" 
-                    @click="collectMacTable"
+                  <el-button
+                    type="primary"
+                    @click="collectMacTableData"
                     :loading="loading.macTable"
                     :disabled="!selectedDeviceId"
                   >
@@ -326,7 +326,7 @@ const collectInterfaces = async () => {
   }
 }
 
-const collectMacTable = async () => {
+const collectMacTableData = async () => {
   loading.value.macTable = true
   try {
     const result = await collectMacTable(selectedDeviceId.value)
