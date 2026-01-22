@@ -5,6 +5,7 @@
 from pydantic import BaseModel, Field, field_validator, ConfigDict, Json
 from typing import Optional, List, Dict, Any
 from datetime import datetime
+from inflection import underscore
 
 
 # 基础响应模型
@@ -13,6 +14,11 @@ class BaseResponse(BaseModel):
     success: bool = Field(..., description="操作是否成功")
     message: str = Field(..., description="响应消息")
     data: Optional[Any] = Field(None, description="响应数据")
+
+    model_config = ConfigDict(
+        alias_generator=underscore,
+        populate_by_name=True
+    )
 
 
 # 设备相关模型
@@ -57,6 +63,14 @@ class DeviceBase(BaseModel):
         """验证设备状态"""
         if v not in ['active', 'inactive', 'maintenance', 'offline']:
             raise ValueError('Status must be active, inactive, maintenance, or offline')
+        return v
+
+    @field_validator('sn')
+    @classmethod
+    def validate_sn(cls, v):
+        """验证并处理SN字段，将空字符串转换为None"""
+        if v == '':
+            return None
         return v
 
 
@@ -244,6 +258,85 @@ class GitConfig(GitConfigBase):
     updated_at: Optional[datetime] = Field(None, description="更新时间")
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# 备份任务相关模型
+class BackupScheduleBase(BaseModel):
+    """备份任务基础模型"""
+    device_id: int = Field(..., alias="deviceId", description="设备ID")
+    schedule_type: str = Field("daily", alias="scheduleType", description="备份类型: hourly, daily, monthly")
+    time: Optional[str] = Field(None, alias="time", description="备份时间点，格式: HH:MM")
+    day: Optional[int] = Field(None, alias="day", description="每月备份日期，1-31")
+    is_active: Optional[bool] = Field(True, alias="isActive", description="是否激活")
+
+    @field_validator('schedule_type')
+    @classmethod
+    def validate_schedule_type(cls, v):
+        """验证备份类型"""
+        if v not in ['hourly', 'daily', 'monthly']:
+            raise ValueError('Schedule type must be hourly, daily, or monthly')
+        return v
+
+    @field_validator('time')
+    @classmethod
+    def validate_time(cls, v):
+        """验证时间格式"""
+        if v:
+            import re
+            if not re.match(r'^([01]?[0-9]|2[0-3]):[0-5][0-9]$', v):
+                raise ValueError('Time format must be HH:MM')
+        return v
+
+    @field_validator('day')
+    @classmethod
+    def validate_day(cls, v):
+        """验证每月日期"""
+        if v:
+            if v < 1 or v > 31:
+                raise ValueError('Day must be between 1 and 31')
+        return v
+
+    model_config = ConfigDict(
+        populate_by_name=True,
+        from_attributes=True
+    )
+
+
+class BackupScheduleCreate(BackupScheduleBase):
+    """创建备份任务模型"""
+    pass
+
+    model_config = ConfigDict(
+        alias_generator=underscore,
+        populate_by_name=True
+    )
+
+
+class BackupScheduleUpdate(BaseModel):
+    """更新备份任务模型"""
+    schedule_type: Optional[str] = Field(None, description="备份类型: hourly, daily, monthly")
+    time: Optional[str] = Field(None, description="备份时间点，格式: HH:MM")
+    day: Optional[int] = Field(None, description="每月备份日期，1-31")
+    is_active: Optional[bool] = Field(None, description="是否激活")
+
+    model_config = ConfigDict(
+        alias_generator=underscore,
+        populate_by_name=True
+    )
+
+
+class BackupSchedule(BackupScheduleBase):
+    """备份任务模型"""
+    id: int = Field(..., description="备份任务ID")
+    device_name: Optional[str] = Field(None, description="设备名称")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
+
+    model_config = ConfigDict(
+        alias_generator=underscore,
+        from_attributes=True,
+        populate_by_name=True
+    )
 
 
 # MAC地址相关模型

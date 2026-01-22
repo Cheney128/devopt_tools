@@ -14,7 +14,7 @@ if sys.platform == 'win32':
     sys.stderr = codecs.getwriter('utf-8')(sys.stderr.buffer, 'strict')
 
 from app.models import Base, engine
-from app.models.models import Device, Port, VLAN, Inspection, Configuration, MACAddress, DeviceVersion
+from app.models.models import Device, Port, VLAN, Inspection, Configuration, MACAddress, DeviceVersion, BackupSchedule
 
 
 def init_db():

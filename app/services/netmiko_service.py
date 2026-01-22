@@ -23,18 +23,23 @@ class NetmikoService:
     提供设备连接、命令执行和数据采集功能
     """
 
-    # 设备类型映射
+    # 设备类型映射（支持中英文厂商名称）
     DEVICE_TYPE_MAPPING = {
         "cisco": "cisco_ios",
         "cisco_ios": "cisco_ios",
         "cisco_nxos": "cisco_nxos",
         "cisco_asa": "cisco_asa",
         "huawei": "huawei",
+        "华为": "huawei",  # 添加中文厂商名称映射
         "h3c": "hp_comware",
         "hp_comware": "hp_comware",
+        "华三": "hp_comware",  # 添加中文厂商名称映射
         "ruijie": "ruijie_os",
+        "锐捷": "ruijie_os",  # 添加中文厂商名称映射
         "juniper": "juniper_junos",
         "arista": "arista_eos",
+        "中兴": "huawei",  # 添加中文厂商名称映射
+        "zte": "huawei",
     }
 
     # 命令映射
@@ -75,8 +80,9 @@ class NetmikoService:
 
     def __init__(self):
         """初始化Netmiko服务"""
-        self.timeout = 30
+        self.timeout = 60  # 增加默认超时时间到60秒
         self.max_retries = 3
+        self.conn_timeout = 30  # 增加连接超时时间到30秒
 
     def get_device_type(self, vendor: str) -> str:
         """
@@ -135,6 +141,7 @@ class NetmikoService:
             "password": device.password,
             "port": device.login_port,
             "timeout": self.timeout,
+            "conn_timeout": self.conn_timeout,  # 增加连接超时时间
             "session_log": None,  # 禁用会话日志以提高性能
         }
 

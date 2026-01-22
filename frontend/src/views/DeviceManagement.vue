@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Delete, ArrowDown } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox, ElUpload, ElButton, ElIcon, ElDialog, ElForm, ElFormItem } from 'element-plus'
+import { Plus, Delete, ArrowDown, Upload, Download } from '@element-plus/icons-vue'
 import { useDeviceStore } from '../stores/deviceStore'
 import { deviceApi } from '../api/index'
 
@@ -250,6 +250,64 @@ const handleTestConnectivity = async (device) => {
   }
 }
 
+// 批量上传相关
+const uploadDialogVisible = ref(false)
+const uploadLoading = ref(false)
+const fileList = ref([])
+const skipExisting = ref(false)
+
+// 下载模板
+const handleDownloadTemplate = async () => {
+  try {
+    const response = await deviceApi.downloadTemplate()
+    const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = '设备模板.xlsx'
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success('模板下载成功')
+  } catch (error) {
+    ElMessage.error('模板下载失败：' + (error.message || '未知错误'))
+  }
+}
+
+// 处理文件上传
+const handleUpload = async (file) => {
+  try {
+    uploadLoading.value = true
+    const result = await deviceApi.batchImportDevices(file.raw, skipExisting.value)
+    
+    // 显示上传结果
+    ElMessage.success(result.message)
+    
+    // 刷新设备列表
+    await fetchDevices()
+    
+    // 关闭对话框
+    uploadDialogVisible.value = false
+    fileList.value = []
+  } catch (error) {
+    ElMessage.error('上传失败：' + (error.response?.data?.detail || error.message || '未知错误'))
+  } finally {
+    uploadLoading.value = false
+  }
+}
+
+// 上传前的文件验证
+const beforeUpload = (file) => {
+  const isXLSX = file.type === 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' || file.name.endsWith('.xlsx')
+  if (!isXLSX) {
+    ElMessage.error('仅支持.xlsx格式文件')
+    return false
+  }
+  fileList.value = [file]
+  return false // 阻止默认上传，使用手动上传
+}
+
 // 生命周期钩子
 onMounted(() => {
   fetchDevices()
@@ -286,6 +344,14 @@ onMounted(() => {
                 </el-dropdown-menu>
               </template>
             </el-dropdown>
+            <el-button type="info" @click="uploadDialogVisible = true">
+              <el-icon><Upload /></el-icon>
+              批量上传设备
+            </el-button>
+            <el-button type="warning" @click="handleDownloadTemplate">
+              <el-icon><Download /></el-icon>
+              下载模板
+            </el-button>
           </div>
         </div>
       </template>
@@ -440,6 +506,57 @@ onMounted(() => {
         <span class="dialog-footer">
           <el-button @click="dialogVisible = false">取消</el-button>
           <el-button type="primary" @click="handleSubmit" :loading="loading">确定</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 批量上传对话框 -->
+    <el-dialog
+      v-model="uploadDialogVisible"
+      title="批量上传设备"
+      width="500px"
+    >
+      <el-form>
+        <el-form-item label="上传文件">
+          <el-upload
+            v-model:file-list="fileList"
+            :before-upload="beforeUpload"
+            :auto-upload="false"
+            accept=".xlsx"
+            drag
+            action=""
+          >
+            <el-icon class="el-icon--upload"><Upload /></el-icon>
+            <div class="el-upload__text">
+              拖拽文件到此处或 <em>点击上传</em>
+            </div>
+            <template #tip>
+              <div class="el-upload__tip">
+                仅支持.xlsx格式文件，文件大小不超过10MB
+              </div>
+            </template>
+          </el-upload>
+        </el-form-item>
+        <el-form-item label="上传选项">
+          <el-checkbox v-model="skipExisting">跳过已存在的设备</el-checkbox>
+          <div class="option-tip">
+            <span class="el-form-item__help">
+              勾选后，系统将跳过已存在的设备（根据IP地址判断），不勾选则更新已存在设备的信息
+            </span>
+          </div>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="uploadDialogVisible = false">取消</el-button>
+          <el-button 
+            type="primary" 
+            @click="fileList.length > 0 && handleUpload(fileList[0])" 
+            :loading="uploadLoading"
+            :disabled="fileList.length === 0"
+          >
+            确定上传
+          </el-button>
         </span>
       </template>
     </el-dialog>

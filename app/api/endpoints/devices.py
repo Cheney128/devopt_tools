@@ -1,9 +1,11 @@
 """
 设备管理API路由
 """
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
 from sqlalchemy.orm import Session
 from typing import List, Optional
+from fastapi.responses import StreamingResponse
+from io import BytesIO
 
 from app.models import get_db
 from app.models.models import Device
@@ -13,6 +15,7 @@ from app.schemas.schemas import Device as DeviceSchema, DeviceCreate, DeviceUpda
 router = APIRouter()
 
 from app.services.netmiko_service import get_netmiko_service
+from app.services.excel_service import import_devices_from_excel, generate_device_template
 
 
 @router.get("/", response_model=List[DeviceSchema])
@@ -256,3 +259,77 @@ async def test_connectivity(device_id: int, db: Session = Depends(get_db)):
     db.refresh(device)
     
     return result
+
+
+@router.post("/batch/import", response_model=BatchOperationResult)
+def batch_import_devices(
+    file: UploadFile = File(...),
+    skip_existing: bool = False,
+    db: Session = Depends(get_db)
+):
+    """
+    批量导入设备数据
+    
+    Args:
+        file: Excel文件
+        skip_existing: 是否跳过已存在的设备，False则更新
+        db: SQLAlchemy会话
+    
+    Returns:
+        导入结果统计
+    """
+    # 验证文件类型
+    if not file.filename.endswith('.xlsx'):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="仅支持.xlsx格式文件"
+        )
+    
+    # 读取文件内容
+    try:
+        file_content = BytesIO(file.file.read())
+        result = import_devices_from_excel(file_content, db, skip_existing=skip_existing)
+        
+        return BatchOperationResult(
+            success=result['failed'] == 0,
+            message=f"批量导入完成: {result['success']} 成功, {result['skipped']} 跳过, {result['failed']} 失败",
+            total=result['total'],
+            success_count=result['success'],
+            failed_count=result['failed'],
+            failed_devices=result['errors'] if result['errors'] else None
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"导入失败: {str(e)}"
+        )
+
+
+@router.get("/template")
+def download_device_template(db: Session = Depends(get_db)):
+    """
+    下载设备模板
+    
+    Args:
+        db: SQLAlchemy会话
+    
+    Returns:
+        Excel模板文件
+    """
+    try:
+        # 生成模板
+        template_stream = generate_device_template(db)
+        
+        # 返回流式响应
+        return StreamingResponse(
+            template_stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": "attachment; filename=设备模板.xlsx"
+            }
+        )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"生成模板失败: {str(e)}"
+        )

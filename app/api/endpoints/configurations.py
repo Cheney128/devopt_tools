@@ -7,11 +7,16 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from app.models import get_db
-from app.models.models import Configuration, Device, GitConfig
-from app.schemas.schemas import Configuration as ConfigurationSchema, ConfigurationCreate
+from app.models.models import Configuration, Device, GitConfig, BackupSchedule
+from app.schemas.schemas import (Configuration as ConfigurationSchema, 
+                                 ConfigurationCreate, 
+                                 BackupSchedule as BackupScheduleSchema,
+                                 BackupScheduleCreate,
+                                 BackupScheduleUpdate)
 from app.services.oxidized_service import get_oxidized_service, OxidizedService
 from app.services.netmiko_service import get_netmiko_service, NetmikoService
 from app.services.git_service import get_git_service, GitService
+from app.services.backup_scheduler import get_backup_scheduler, BackupSchedulerService
 
 # 创建路由器
 router = APIRouter()
@@ -414,3 +419,258 @@ def get_config_diff(
             "config_time": config2.config_time
         }
     }
+
+
+@router.post("/{config_id}/commit-git", response_model=Dict[str, Any])
+def commit_config_to_git(
+    config_id: int,
+    db: Session = Depends(get_db),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    手动将配置提交到Git仓库
+    """
+    try:
+        # 获取配置和设备信息
+        result = db.query(Configuration, Device).join(
+            Device, Configuration.device_id == Device.id
+        ).filter(Configuration.id == config_id).first()
+        
+        if not result:
+            return {"success": False, "message": "Configuration not found"}
+        
+        config, device = result
+        
+        # 检查是否已经提交到Git
+        if config.git_commit_id:
+            return {"success": False, "message": "Configuration already committed to Git"}
+        
+        # 获取活跃的Git配置
+        git_config = db.query(GitConfig).filter(GitConfig.is_active == True).first()
+        if not git_config:
+            return {"success": False, "message": "No active Git configuration found"}
+        
+        # 执行Git操作
+        if git_service.init_repo(git_config):
+            commit_id = git_service.commit_config(
+                device.hostname,
+                config.config_content,
+                f"Manual commit for {device.hostname} at {datetime.now()}"
+            )
+            if commit_id:
+                if git_service.push_to_remote():
+                    # 更新配置记录的git_commit_id
+                    config.git_commit_id = commit_id
+                    db.commit()
+                    git_service.close()
+                    return {
+                        "success": True,
+                        "message": "Config successfully committed to Git",
+                        "commit_id": commit_id
+                    }
+                else:
+                    git_service.close()
+                    return {"success": False, "message": "Failed to push to Git remote"}
+            else:
+                git_service.close()
+                return {"success": False, "message": "Failed to commit to Git"}
+        else:
+            return {"success": False, "message": "Failed to initialize Git repo"}
+    except Exception as e:
+        print(f"Git commit error: {str(e)}")
+        return {"success": False, "message": f"Git operation failed: {str(e)}"}
+
+
+@router.post("/backup-schedules", response_model=Dict[str, Any])
+def create_backup_schedule(
+    schedule: BackupScheduleCreate,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
+):
+    """
+    创建备份任务
+    """
+    try:
+        # 检查设备是否存在
+        device = db.query(Device).filter(Device.id == schedule.device_id).first()
+        if not device:
+            return {"success": False, "message": "Device not found"}
+        
+        # 创建备份任务
+        db_schedule = BackupSchedule(**schedule.model_dump())
+        db.add(db_schedule)
+        db.commit()
+        db.refresh(db_schedule)
+        
+        # 添加到调度器
+        if db_schedule.is_active:
+            backup_scheduler.add_schedule(db_schedule, db)
+        
+        return {
+            "success": True,
+            "message": "Backup schedule created successfully",
+            "schedule_id": db_schedule.id
+        }
+    except Exception as e:
+        print(f"Create backup schedule error: {str(e)}")
+        return {"success": False, "message": f"Failed to create backup schedule: {str(e)}"}
+
+
+@router.get("/backup-schedules", response_model=List[BackupScheduleSchema])
+def get_backup_schedules(
+    device_id: Optional[int] = None,
+    is_active: Optional[bool] = None,
+    db: Session = Depends(get_db)
+):
+    """
+    获取备份任务列表
+    """
+    query = db.query(BackupSchedule, Device.hostname.label('device_name')).join(
+        Device, BackupSchedule.device_id == Device.id
+    )
+    
+    if device_id:
+        query = query.filter(BackupSchedule.device_id == device_id)
+    
+    if is_active is not None:
+        query = query.filter(BackupSchedule.is_active == is_active)
+    
+    results = query.order_by(BackupSchedule.created_at.desc()).all()
+    
+    # 转换为备份任务模式列表
+    schedules = []
+    for schedule, device_name in results:
+        schedule_dict = {
+            'id': schedule.id,
+            'device_id': schedule.device_id,
+            'device_name': device_name,
+            'schedule_type': schedule.schedule_type,
+            'time': schedule.time,
+            'day': schedule.day,
+            'is_active': schedule.is_active,
+            'created_at': schedule.created_at,
+            'updated_at': schedule.updated_at
+        }
+        schedules.append(BackupScheduleSchema(**schedule_dict))
+    
+    return schedules
+
+
+@router.get("/backup-schedules/{schedule_id}", response_model=BackupScheduleSchema)
+def get_backup_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    获取单个备份任务详情
+    """
+    result = db.query(BackupSchedule, Device.hostname.label('device_name')).join(
+        Device, BackupSchedule.device_id == Device.id
+    ).filter(BackupSchedule.id == schedule_id).first()
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Backup schedule {schedule_id} not found"
+        )
+    
+    schedule, device_name = result
+    schedule_dict = {
+        'id': schedule.id,
+        'device_id': schedule.device_id,
+        'device_name': device_name,
+        'schedule_type': schedule.schedule_type,
+        'time': schedule.time,
+        'day': schedule.day,
+        'is_active': schedule.is_active,
+        'created_at': schedule.created_at,
+        'updated_at': schedule.updated_at
+    }
+    
+    return BackupScheduleSchema(**schedule_dict)
+
+
+@router.put("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
+def update_backup_schedule(
+    schedule_id: int,
+    schedule_update: BackupScheduleUpdate,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
+):
+    """
+    更新备份任务
+    """
+    try:
+        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
+        if not db_schedule:
+            return {"success": False, "message": "Backup schedule not found"}
+        
+        # 更新字段
+        update_data = schedule_update.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(db_schedule, field, value)
+        
+        db.commit()
+        db.refresh(db_schedule)
+        
+        # 更新调度器
+        backup_scheduler.update_schedule(db_schedule, db)
+        
+        return {
+            "success": True,
+            "message": "Backup schedule updated successfully"
+        }
+    except Exception as e:
+        print(f"Update backup schedule error: {str(e)}")
+        return {"success": False, "message": f"Failed to update backup schedule: {str(e)}"}
+
+
+@router.delete("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
+def delete_backup_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
+):
+    """
+    删除备份任务
+    """
+    try:
+        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
+        if not db_schedule:
+            return {"success": False, "message": "Backup schedule not found"}
+        
+        # 从调度器中移除
+        backup_scheduler.remove_schedule(schedule_id)
+        
+        db.delete(db_schedule)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Backup schedule deleted successfully"
+        }
+    except Exception as e:
+        print(f"Delete backup schedule error: {str(e)}")
+        return {"success": False, "message": f"Failed to delete backup schedule: {str(e)}"}
+
+
+@router.post("/device/{device_id}/backup-now", response_model=Dict[str, Any])
+async def backup_now(
+    device_id: int,
+    db: Session = Depends(get_db),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    立即执行设备备份
+    """
+    try:
+        # 直接调用现有的collect_config_from_device函数执行备份
+        result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
+        return result
+    except Exception as e:
+        print(f"Backup now error: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to execute backup: {str(e)}"
+        }

@@ -11,6 +11,9 @@ netmiko==4.1.0
 paramiko==3.4.0
 httpx==0.25.2
 python-multipart==0.0.6
+# Excel处理依赖
+pandas==2.1.4
+openpyxl==3.1.2
 # CORS已在FastAPI内置，不需要单独安装
 
 # 开发依赖

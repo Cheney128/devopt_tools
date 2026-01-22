@@ -29,7 +29,20 @@ export const deviceApi = {
   deleteDevice: (id) => api.delete(`/devices/${id}`),
   batchDeleteDevices: (ids) => api.post('/devices/batch/delete', ids),
   batchUpdateStatus: (ids, status) => api.post('/devices/batch/update-status', ids, { params: { status } }),
-  testConnectivity: (id) => api.post(`/devices/${id}/test-connectivity`)
+  testConnectivity: (id) => api.post(`/devices/${id}/test-connectivity`),
+  // 批量导入设备
+  batchImportDevices: (file, skipExisting = false) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/devices/batch/import', formData, {
+      params: { skip_existing: skipExisting },
+      headers: {
+        'Content-Type': 'multipart/form-data'
+      }
+    })
+  },
+  // 下载设备模板
+  downloadTemplate: () => api.get('/devices/template', { responseType: 'blob' })
 }
 
 // 端口API
@@ -70,7 +83,14 @@ export const configurationApi = {
   deleteConfiguration: (id) => api.delete(`/configurations/${id}`),
   batchDeleteConfigurations: (ids) => api.post('/configurations/batch/delete', ids),
   collectConfigFromDevice: (deviceId) => api.post(`/configurations/device/${deviceId}/collect`),
-  getConfigDiff: (configId1, configId2) => api.get(`/configurations/diff/${configId1}/${configId2}`)
+  getConfigDiff: (configId1, configId2) => api.get(`/configurations/diff/${configId1}/${configId2}`),
+  commitConfigToGit: (id) => api.post(`/configurations/${id}/commit-git`),
+  // 备份相关API
+  createBackupSchedule: (data) => api.post('/configurations/backup-schedules', data),
+  getBackupSchedules: (params) => api.get('/configurations/backup-schedules', { params }),
+  updateBackupSchedule: (id, data) => api.put(`/configurations/backup-schedules/${id}`, data),
+  deleteBackupSchedule: (id) => api.delete(`/configurations/backup-schedules/${id}`),
+  backupNow: (deviceId) => api.post(`/configurations/device/${deviceId}/backup-now`)
 }
 
 // Git配置API

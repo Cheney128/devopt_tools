@@ -42,6 +42,7 @@ class Device(Base):
     configurations = relationship("Configuration", back_populates="device", cascade="all, delete-orphan")
     mac_addresses = relationship("MACAddress", back_populates="device", cascade="all, delete-orphan")
     device_versions = relationship("DeviceVersion", back_populates="device", cascade="all, delete-orphan")
+    backup_schedules = relationship("BackupSchedule", back_populates="device", cascade="all, delete-orphan")
 
 
 class Port(Base):
@@ -135,6 +136,25 @@ class GitConfig(Base):
     is_active = Column(Boolean, nullable=False, default=True)
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+class BackupSchedule(Base):
+    """
+    备份任务计划表
+    """
+    __tablename__ = "backup_schedules"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    device_id = Column(Integer, ForeignKey("devices.id"), nullable=False)
+    schedule_type = Column(String(20), nullable=False, default="daily")  # hourly, daily, monthly
+    time = Column(String(10), nullable=True)  # 时间点，格式 HH:MM
+    day = Column(Integer, nullable=True)  # 每月的日期，1-31
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+    
+    # 关联关系
+    device = relationship("Device", back_populates="backup_schedules")
 
 
 class MACAddress(Base):

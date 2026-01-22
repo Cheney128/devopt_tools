@@ -6,7 +6,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from app.config import settings
 from app.api import api_router
-
+from app.services.backup_scheduler import backup_scheduler
+from app.models import get_db
 
 # 创建FastAPI应用实例
 app = FastAPI(
@@ -26,6 +27,16 @@ app.add_middleware(
 
 # 注册API路由
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+
+@app.on_event("startup")
+async def startup_event():
+    """
+    应用启动事件
+    """
+    # 加载备份任务
+    db = next(get_db())
+    backup_scheduler.load_schedules(db)
 
 
 @app.get("/")
