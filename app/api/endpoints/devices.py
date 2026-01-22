@@ -41,6 +41,41 @@ def get_devices(
     return devices
 
 
+@router.get("/template")
+def download_device_template(db: Session = Depends(get_db)):
+    """
+    下载设备模板
+    
+    Args:
+        db: SQLAlchemy会话
+    
+    Returns:
+        Excel模板文件
+    """
+    try:
+        # 生成模板
+        template_stream = generate_device_template(db)
+        
+        # 返回流式响应，使用英文文件名避免编码问题
+        return StreamingResponse(
+            template_stream,
+            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            headers={
+                "Content-Disposition": "attachment; filename=device_template.xlsx"
+            }
+        )
+    except Exception as e:
+        # 打印详细的错误信息和堆栈跟踪
+        import traceback
+        print(f"Error generating template: {str(e)}")
+        print("Stack trace:")
+        traceback.print_exc()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"生成模板失败: {str(e)}"
+        )
+
+
 @router.get("/{device_id}", response_model=DeviceWithDetails)
 def get_device(device_id: int, db: Session = Depends(get_db)):
     """
@@ -302,34 +337,4 @@ def batch_import_devices(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"导入失败: {str(e)}"
-        )
-
-
-@router.get("/template")
-def download_device_template(db: Session = Depends(get_db)):
-    """
-    下载设备模板
-    
-    Args:
-        db: SQLAlchemy会话
-    
-    Returns:
-        Excel模板文件
-    """
-    try:
-        # 生成模板
-        template_stream = generate_device_template(db)
-        
-        # 返回流式响应
-        return StreamingResponse(
-            template_stream,
-            media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            headers={
-                "Content-Disposition": "attachment; filename=设备模板.xlsx"
-            }
-        )
-    except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"生成模板失败: {str(e)}"
         )

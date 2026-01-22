@@ -260,7 +260,8 @@ const skipExisting = ref(false)
 const handleDownloadTemplate = async () => {
   try {
     const response = await deviceApi.downloadTemplate()
-    const blob = new Blob([response.data], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    // 直接使用 response.data，因为它已经是 Blob 对象
+    const blob = response.data
     const url = window.URL.createObjectURL(blob)
     const link = document.createElement('a')
     link.href = url

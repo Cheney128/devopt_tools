@@ -12,6 +12,10 @@ const api = axios.create({
 // 响应拦截器
 api.interceptors.response.use(
   response => {
+    // 如果是 blob 类型的响应，直接返回 response，不要返回 response.data
+    if (response.config.responseType === 'blob') {
+      return response
+    }
     return response.data
   },
   error => {

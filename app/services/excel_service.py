@@ -6,6 +6,7 @@ from typing import List, Dict, Any, BinaryIO
 import pandas as pd
 from sqlalchemy.orm import Session
 from io import BytesIO
+from openpyxl.styles import Font
 
 from app.models.models import Device
 
@@ -236,13 +237,6 @@ def generate_device_template(session: Session = None) -> BytesIO:
         'username', 'password', 'sn'
     ]
 
-    # 定义字段说明
-    field_descriptions = [
-        '设备名称（必填）', 'IP地址（必填）', '厂商（必填）', '型号（必填）', '操作系统版本',
-        '位置', '联系人', '状态（active/maintenance/offline/faulty）', '登录方式（ssh/telnet/console）', '登录端口',
-        '用户名', '密码', '设备序列号'
-    ]
-
     # 创建模板数据
     if session:
         # 获取现有设备数据
@@ -275,23 +269,24 @@ def generate_device_template(session: Session = None) -> BytesIO:
         # 只有表头的空模板
         df = pd.DataFrame(columns=device_fields)
 
-    # 创建Excel文件
+    # 创建Excel文件，确保正确处理中文字符
     output = BytesIO()
-    with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        df.to_excel(writer, index=False, sheet_name='设备清单')
-        
-        # 获取工作表
-        worksheet = writer.sheets['设备清单']
-        
-        # 设置列宽
-        for col, width in zip(['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H', 'I', 'J', 'K', 'L', 'M'],
-                            [20, 15, 15, 20, 20, 20, 20, 15, 15, 10, 15, 15, 20]):
-            worksheet.column_dimensions[col].width = width
-        
-        # 添加字段说明
-        for i, desc in enumerate(field_descriptions, start=1):
-            worksheet.cell(row=2, column=i, value=desc)
-            worksheet.cell(row=2, column=i).font = writer.book.add_font(size=10, italic=True, color='FF808080')
-
+    # 使用openpyxl直接创建工作簿，避免pandas的编码问题
+    from openpyxl import Workbook
+    
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "设备清单"
+    
+    # 写入表头
+    ws.append(device_fields)
+    
+    # 写入数据
+    for _, row in df.iterrows():
+        ws.append(row.tolist())
+    
+    # 保存到BytesIO对象
+    wb.save(output)
     output.seek(0)
+    
     return output

@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import deviceApi from '../api/device'
+import { deviceApi } from '../api/index'
 
 export const useDeviceStore = defineStore('device', () => {
   // State
