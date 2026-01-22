@@ -111,10 +111,30 @@ class Configuration(Base):
     device_id = Column(Integer, ForeignKey("devices.id"), nullable=False)
     config_content = Column(Text, nullable=True)
     config_time = Column(DateTime, nullable=False, default=func.now())
+    version = Column(String(50), nullable=False, default="1.0")
+    change_description = Column(Text, nullable=True)
+    git_commit_id = Column(String(64), nullable=True)
     created_at = Column(DateTime, nullable=False, default=func.now())
     
     # 关联关系
     device = relationship("Device", back_populates="configurations")
+
+
+class GitConfig(Base):
+    """
+    Git配置信息表
+    """
+    __tablename__ = "git_configs"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    repo_url = Column(String(255), nullable=False, unique=True)
+    username = Column(String(100), nullable=True)
+    password = Column(String(255), nullable=True)
+    branch = Column(String(50), nullable=False, default="main")
+    ssh_key_path = Column(String(255), nullable=True)
+    is_active = Column(Boolean, nullable=False, default=True)
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
 
 
 class MACAddress(Base):

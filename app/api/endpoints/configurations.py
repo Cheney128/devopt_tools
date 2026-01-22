@@ -7,9 +7,11 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 
 from app.models import get_db
-from app.models.models import Configuration, Device
+from app.models.models import Configuration, Device, GitConfig
 from app.schemas.schemas import Configuration as ConfigurationSchema, ConfigurationCreate
 from app.services.oxidized_service import get_oxidized_service, OxidizedService
+from app.services.netmiko_service import get_netmiko_service, NetmikoService
+from app.services.git_service import get_git_service, GitService
 
 # 创建路由器
 router = APIRouter()
@@ -27,7 +29,9 @@ def get_configurations(
     """
     获取配置列表
     """
-    query = db.query(Configuration)
+    query = db.query(Configuration, Device.hostname.label('device_name')).join(
+        Device, Configuration.device_id == Device.id
+    )
     
     if device_id:
         query = query.filter(Configuration.device_id == device_id)
@@ -38,7 +42,24 @@ def get_configurations(
     if end_date:
         query = query.filter(Configuration.config_time <= end_date)
     
-    configurations = query.order_by(Configuration.config_time.desc()).offset(skip).limit(limit).all()
+    results = query.order_by(Configuration.config_time.desc()).offset(skip).limit(limit).all()
+    
+    # 转换为配置模式列表
+    configurations = []
+    for config, device_name in results:
+        config_dict = {
+            'id': config.id,
+            'device_id': config.device_id,
+            'device_name': device_name,
+            'config_content': config.config_content,
+            'config_time': config.config_time,
+            'version': config.version,
+            'change_description': config.change_description,
+            'git_commit_id': config.git_commit_id,
+            'created_at': config.created_at
+        }
+        configurations.append(ConfigurationSchema(**config_dict))
+    
     return configurations
 
 
@@ -47,13 +68,29 @@ def get_configuration(config_id: int, db: Session = Depends(get_db)):
     """
     获取配置详情
     """
-    configuration = db.query(Configuration).filter(Configuration.id == config_id).first()
-    if not configuration:
+    result = db.query(Configuration, Device.hostname.label('device_name')).join(
+        Device, Configuration.device_id == Device.id
+    ).filter(Configuration.id == config_id).first()
+    
+    if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Configuration with id {config_id} not found"
         )
-    return configuration
+    
+    config, device_name = result
+    config_dict = {
+        'id': config.id,
+        'device_id': config.device_id,
+        'device_name': device_name,
+        'config_content': config.config_content,
+        'config_time': config.config_time,
+        'version': config.version,
+        'change_description': config.change_description,
+        'git_commit_id': config.git_commit_id,
+        'created_at': config.created_at
+    }
+    return ConfigurationSchema(**config_dict)
 
 
 @router.post("/", response_model=ConfigurationSchema, status_code=status.HTTP_201_CREATED)
@@ -61,7 +98,6 @@ def create_configuration(configuration: ConfigurationCreate, db: Session = Depen
     """
     创建配置记录
     """
-    # 检查设备是否存在
     device = db.query(Device).filter(Device.id == configuration.device_id).first()
     if not device:
         raise HTTPException(
@@ -69,12 +105,23 @@ def create_configuration(configuration: ConfigurationCreate, db: Session = Depen
             detail=f"Device with id {configuration.device_id} not found"
         )
     
-    # 创建配置记录
     db_configuration = Configuration(**configuration.model_dump())
     db.add(db_configuration)
     db.commit()
     db.refresh(db_configuration)
-    return db_configuration
+    
+    config_dict = {
+        'id': db_configuration.id,
+        'device_id': db_configuration.device_id,
+        'device_name': device.hostname,
+        'config_content': db_configuration.config_content,
+        'config_time': db_configuration.config_time,
+        'version': db_configuration.version,
+        'change_description': db_configuration.change_description,
+        'git_commit_id': db_configuration.git_commit_id,
+        'created_at': db_configuration.created_at
+    }
+    return ConfigurationSchema(**config_dict)
 
 
 @router.get("/device/{device_id}/latest", response_model=ConfigurationSchema)
@@ -82,7 +129,6 @@ def get_latest_configuration(device_id: int, db: Session = Depends(get_db)):
     """
     获取设备最新配置
     """
-    # 检查设备是否存在
     device = db.query(Device).filter(Device.id == device_id).first()
     if not device:
         raise HTTPException(
@@ -90,18 +136,31 @@ def get_latest_configuration(device_id: int, db: Session = Depends(get_db)):
             detail=f"Device with id {device_id} not found"
         )
     
-    # 获取最新配置
-    configuration = db.query(Configuration).filter(
+    result = db.query(Configuration, Device.hostname.label('device_name')).join(
+        Device, Configuration.device_id == Device.id
+    ).filter(
         Configuration.device_id == device_id
     ).order_by(Configuration.config_time.desc()).first()
     
-    if not configuration:
+    if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"No configuration found for device {device_id}"
         )
     
-    return configuration
+    config, device_name = result
+    config_dict = {
+        'id': config.id,
+        'device_id': config.device_id,
+        'device_name': device_name,
+        'config_content': config.config_content,
+        'config_time': config.config_time,
+        'version': config.version,
+        'change_description': config.change_description,
+        'git_commit_id': config.git_commit_id,
+        'created_at': config.created_at
+    }
+    return ConfigurationSchema(**config_dict)
 
 
 @router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -189,12 +248,13 @@ async def get_config_from_oxidized(
     if not config_content:
         return {"success": False, "message": "Failed to get config from Oxidized"}
     
-    # 保存配置到数据库
     device = db.query(Device).filter(Device.id == device_id).first()
     if device:
         new_config = Configuration(
             device_id=device_id,
-            config_content=config_content
+            config_content=config_content,
+            version="1.0",
+            change_description="Fetched from Oxidized"
         )
         db.add(new_config)
         db.commit()
@@ -202,7 +262,155 @@ async def get_config_from_oxidized(
         return {
             "success": True,
             "message": "Config fetched from Oxidized and saved",
-            "config_id": new_config.id
+            "config_id": new_config.id,
+            "version": new_config.version
         }
     
     return {"success": False, "message": "Device not found"}
+
+
+@router.post("/device/{device_id}/collect", response_model=Dict[str, Any])
+async def collect_config_from_device(
+    device_id: int,
+    db: Session = Depends(get_db),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    直接从设备获取配置
+    """
+    try:
+        # 检查设备是否存在
+        device = db.query(Device).filter(Device.id == device_id).first()
+        if not device:
+            return {"success": False, "message": "Device not found"}
+        
+        # 从设备获取配置
+        config_content = await netmiko_service.collect_running_config(device)
+        if not config_content:
+            return {"success": False, "message": "Failed to get config from device"}
+        
+        # 获取设备最新配置
+        latest_config = db.query(Configuration).filter(
+            Configuration.device_id == device_id
+        ).order_by(Configuration.config_time.desc()).first()
+        
+        # 检查配置是否有变化
+        if latest_config and latest_config.config_content == config_content:
+            return {
+                "success": True,
+                "message": "Config has not changed",
+                "config_id": latest_config.id
+            }
+        
+        # 生成版本号
+        new_version = "1.0"
+        if latest_config:
+            # 简单的版本号递增逻辑
+            current_version = latest_config.version
+            try:
+                major, minor = map(int, current_version.split("."))
+                new_version = f"{major}.{minor + 1}"
+            except:
+                new_version = "1.0"
+        
+        # 创建新的配置记录
+        new_config = Configuration(
+            device_id=device_id,
+            config_content=config_content,
+            version=new_version,
+            change_description="Auto-collected from device"
+        )
+        
+        # 检查是否有Git配置，如果有则提交到Git（添加错误处理）
+        try:
+            git_config = db.query(GitConfig).filter(GitConfig.is_active == True).first()
+            if git_config:
+                if git_service.init_repo(git_config):
+                    commit_id = git_service.commit_config(
+                        device.hostname,
+                        config_content,
+                        f"Auto-update config for {device.hostname} at {datetime.now()}"
+                    )
+                    if commit_id:
+                        git_service.push_to_remote()
+                        new_config.git_commit_id = commit_id
+                    git_service.close()
+        except Exception as git_error:
+            print(f"Git operation error: {str(git_error)}")
+            # Git操作失败不影响配置获取，继续执行
+        
+        # 保存到数据库
+        db.add(new_config)
+        db.commit()
+        db.refresh(new_config)
+        
+        return {
+            "success": True,
+            "message": "Config collected from device and saved",
+            "config_id": new_config.id,
+            "version": new_config.version
+        }
+    except Exception as e:
+        print(f"Error in collect_config_from_device: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to collect config: {str(e)}"
+        }
+
+
+@router.get("/diff/{config_id1}/{config_id2}", response_model=Dict[str, Any])
+def get_config_diff(
+    config_id1: int,
+    config_id2: int,
+    db: Session = Depends(get_db)
+):
+    """
+    获取两个配置版本之间的差异
+    """
+    # 获取两个配置
+    config1 = db.query(Configuration).filter(Configuration.id == config_id1).first()
+    config2 = db.query(Configuration).filter(Configuration.id == config_id2).first()
+    
+    if not config1:
+        return {"success": False, "message": f"Configuration {config_id1} not found"}
+    
+    if not config2:
+        return {"success": False, "message": f"Configuration {config_id2} not found"}
+    
+    # 确保两个配置属于同一设备
+    if config1.device_id != config2.device_id:
+        return {"success": False, "message": "Configurations belong to different devices"}
+    
+    # 生成diff
+    import difflib
+    
+    if not config1.config_content:
+        config1.config_content = ""
+    if not config2.config_content:
+        config2.config_content = ""
+    
+    diff = difflib.unified_diff(
+        config1.config_content.splitlines(),
+        config2.config_content.splitlines(),
+        fromfile=f"Version {config1.version} ({config1.config_time.strftime('%Y-%m-%d %H:%M:%S')})",
+        tofile=f"Version {config2.version} ({config2.config_time.strftime('%Y-%m-%d %H:%M:%S')})",
+        lineterm=""
+    )
+    
+    diff_content = "\n".join(diff)
+    
+    return {
+        "success": True,
+        "diff": diff_content,
+        "config1": {
+            "id": config1.id,
+            "version": config1.version,
+            "config_time": config1.config_time
+        },
+        "config2": {
+            "id": config2.id,
+            "version": config2.version,
+            "config_time": config2.config_time
+        }
+    }

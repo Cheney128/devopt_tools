@@ -55,8 +55,8 @@ class DeviceBase(BaseModel):
     @classmethod
     def validate_status(cls, v):
         """验证设备状态"""
-        if v not in ['active', 'inactive', 'maintenance']:
-            raise ValueError('Status must be active, inactive, or maintenance')
+        if v not in ['active', 'inactive', 'maintenance', 'offline']:
+            raise ValueError('Status must be active, inactive, maintenance, or offline')
         return v
 
 
@@ -192,6 +192,9 @@ class ConfigurationBase(BaseModel):
     device_id: int = Field(..., description="设备ID")
     config_content: Optional[str] = Field(None, description="配置内容")
     config_time: Optional[datetime] = Field(None, description="配置时间")
+    version: Optional[str] = Field("1.0", description="配置版本")
+    change_description: Optional[str] = Field(None, description="配置变更描述")
+    git_commit_id: Optional[str] = Field(None, description="Git提交ID")
 
 
 class ConfigurationCreate(ConfigurationBase):
@@ -202,7 +205,43 @@ class ConfigurationCreate(ConfigurationBase):
 class Configuration(ConfigurationBase):
     """配置模型"""
     id: int = Field(..., description="配置ID")
+    device_name: Optional[str] = Field(None, description="设备名称")
     created_at: Optional[datetime] = Field(None, description="创建时间")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# Git配置相关模型
+class GitConfigBase(BaseModel):
+    """Git配置基础模型"""
+    repo_url: str = Field(..., description="Git仓库URL")
+    username: Optional[str] = Field(None, description="Git用户名")
+    password: Optional[str] = Field(None, description="Git密码或Token")
+    branch: Optional[str] = Field("main", description="Git分支")
+    ssh_key_path: Optional[str] = Field(None, description="SSH密钥路径")
+    is_active: Optional[bool] = Field(True, description="是否激活")
+
+
+class GitConfigCreate(GitConfigBase):
+    """创建Git配置模型"""
+    pass
+
+
+class GitConfigUpdate(BaseModel):
+    """更新Git配置模型"""
+    repo_url: Optional[str] = Field(None, description="Git仓库URL")
+    username: Optional[str] = Field(None, description="Git用户名")
+    password: Optional[str] = Field(None, description="Git密码或Token")
+    branch: Optional[str] = Field(None, description="Git分支")
+    ssh_key_path: Optional[str] = Field(None, description="SSH密钥路径")
+    is_active: Optional[bool] = Field(None, description="是否激活")
+
+
+class GitConfig(GitConfigBase):
+    """Git配置模型"""
+    id: int = Field(..., description="Git配置ID")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -306,14 +345,14 @@ class DeviceCollectionRequest(BaseModel):
     collect_types: List[str] = Field(
         ...,
         description="采集类型列表",
-        json_schema_extra={"example": ["version", "serial", "interfaces", "mac_table"]}
+        json_schema_extra={"example": ["version", "serial", "interfaces", "mac_table", "running_config"]}
     )
 
     @field_validator('collect_types')
     @classmethod
     def validate_collect_types(cls, v):
         """验证采集类型"""
-        valid_types = ['version', 'serial', 'interfaces', 'mac_table']
+        valid_types = ['version', 'serial', 'interfaces', 'mac_table', 'running_config']
         for collect_type in v:
             if collect_type not in valid_types:
                 raise ValueError(f'Invalid collect type: {collect_type}. Must be one of {valid_types}')

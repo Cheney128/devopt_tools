@@ -9,7 +9,8 @@ import {
   Grid as GridIcon,
   DataAnalysis as DataAnalysisIcon,
   Document as DocumentIcon,
-  Monitor as MonitorIcon
+  Monitor as MonitorIcon,
+  FolderOpened as GitIcon
 } from '@element-plus/icons-vue'
 import router from './router'
 
@@ -81,6 +82,10 @@ const handleSelect = (key, keyPath) => {
             <el-menu-item index="/device-collection">
               <el-icon><MonitorIcon /></el-icon>
               <span>设备采集</span>
+            </el-menu-item>
+            <el-menu-item index="/git-configs">
+              <el-icon><GitIcon /></el-icon>
+              <span>Git配置管理</span>
             </el-menu-item>
           </el-menu>
         </el-aside>

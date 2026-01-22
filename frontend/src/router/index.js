@@ -37,6 +37,11 @@ const router = createRouter({
       path: '/device-collection',
       name: 'device-collection',
       component: () => import('../views/DeviceCollection.vue')
+    },
+    {
+      path: '/git-configs',
+      name: 'git-configs',
+      component: () => import('../views/GitConfigManagement.vue')
     }
   ]
 })

@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Delete, ArrowDown } from '@element-plus/icons-vue'
 import { useDeviceStore } from '../stores/deviceStore'
+import { deviceApi } from '../api/index'
 
 // 设备状态选项
 const statusOptions = [
@@ -229,6 +230,26 @@ const handleSelectionChange = (val) => {
   multipleSelection.value = val
 }
 
+// 测试设备连接性
+const handleTestConnectivity = async (device) => {
+  try {
+    loading.value = true
+    const result = await deviceApi.testConnectivity(device.id)
+    
+    if (result.success) {
+      ElMessage.success(result.message)
+    } else {
+      ElMessage.error(result.message)
+    }
+  } catch (error) {
+    ElMessage.error('连接测试失败：' + (error.message || '未知错误'))
+  } finally {
+    // 无论测试成功与否，都刷新设备列表
+    await fetchDevices()
+    loading.value = false
+  }
+}
+
 // 生命周期钩子
 onMounted(() => {
   fetchDevices()
@@ -324,10 +345,11 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="280" fixed="right">
           <template #default="scope">
             <el-button size="small" @click="handleEditDevice(scope.row)">编辑</el-button>
             <el-button size="small" type="danger" @click="handleDeleteDevice(scope.row)">删除</el-button>
+            <el-button size="small" type="warning" @click="handleTestConnectivity(scope.row)">连接性测试</el-button>
           </template>
         </el-table-column>
       </el-table>

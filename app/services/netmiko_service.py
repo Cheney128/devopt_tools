@@ -755,6 +755,27 @@ class NetmikoService:
 
         return mac_table if mac_table else None
 
+    async def collect_running_config(self, device: Device) -> Optional[str]:
+        """
+        采集设备运行配置
+
+        Args:
+            device: 设备对象
+
+        Returns:
+            运行配置字符串，失败返回None
+        """
+        if not device.username or not device.password:
+            print(f"Device {device.hostname} missing credentials")
+            return None
+
+        command = self.get_commands(device.vendor, "running_config")
+        if not command:
+            return None
+
+        output = await self.execute_command(device, command)
+        return output if output else None
+
     async def batch_collect_device_info(
         self,
         devices: List[Device],
@@ -765,7 +786,7 @@ class NetmikoService:
 
         Args:
             devices: 设备对象列表
-            collect_types: 采集类型列表，如 ["version", "serial", "interfaces", "mac_table"]
+            collect_types: 采集类型列表，如 ["version", "serial", "interfaces", "mac_table", "running_config"]
 
         Returns:
             批量采集结果字典
@@ -810,6 +831,12 @@ class NetmikoService:
                     mac_table = await self.collect_mac_table(device)
                     if mac_table:
                         detail["data"]["mac_table"] = mac_table
+                        
+                # 采集运行配置
+                if "running_config" in collect_types:
+                    running_config = await self.collect_running_config(device)
+                    if running_config:
+                        detail["data"]["running_config"] = running_config
 
                 # 判断是否至少有一种数据采集成功
                 if detail["data"]:

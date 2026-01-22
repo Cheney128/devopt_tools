@@ -3,7 +3,7 @@ import axios from 'axios'
 // 创建axios实例
 const api = axios.create({
   baseURL: 'http://localhost:8000/api/v1',
-  timeout: 10000,
+  timeout: 35000,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -28,7 +28,8 @@ export const deviceApi = {
   updateDevice: (id, data) => api.put(`/devices/${id}`, data),
   deleteDevice: (id) => api.delete(`/devices/${id}`),
   batchDeleteDevices: (ids) => api.post('/devices/batch/delete', ids),
-  batchUpdateStatus: (ids, status) => api.post('/devices/batch/update-status', ids, { params: { status } })
+  batchUpdateStatus: (ids, status) => api.post('/devices/batch/update-status', ids, { params: { status } }),
+  testConnectivity: (id) => api.post(`/devices/${id}/test-connectivity`)
 }
 
 // 端口API
@@ -67,7 +68,20 @@ export const configurationApi = {
   getLatestConfiguration: (deviceId) => api.get(`/configurations/device/${deviceId}/latest`),
   createConfiguration: (data) => api.post('/configurations', data),
   deleteConfiguration: (id) => api.delete(`/configurations/${id}`),
-  batchDeleteConfigurations: (ids) => api.post('/configurations/batch/delete', ids)
+  batchDeleteConfigurations: (ids) => api.post('/configurations/batch/delete', ids),
+  collectConfigFromDevice: (deviceId) => api.post(`/configurations/device/${deviceId}/collect`),
+  getConfigDiff: (configId1, configId2) => api.get(`/configurations/diff/${configId1}/${configId2}`)
+}
+
+// Git配置API
+export const gitConfigApi = {
+  getGitConfigs: (params) => api.get('/git-configs', { params }),
+  getGitConfig: (id) => api.get(`/git-configs/${id}`),
+  createGitConfig: (data) => api.post('/git-configs', data),
+  updateGitConfig: (id, data) => api.put(`/git-configs/${id}`, data),
+  deleteGitConfig: (id) => api.delete(`/git-configs/${id}`),
+  testGitConnection: (id) => api.post(`/git-configs/${id}/test`),
+  setActiveGitConfig: (id) => api.post(`/git-configs/active/${id}`)
 }
 
 export default api

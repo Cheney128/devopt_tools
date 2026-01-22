@@ -12,6 +12,8 @@ from app.schemas.schemas import Device as DeviceSchema, DeviceCreate, DeviceUpda
 # 创建路由器
 router = APIRouter()
 
+from app.services.netmiko_service import get_netmiko_service
+
 
 @router.get("/", response_model=List[DeviceSchema])
 def get_devices(
@@ -210,3 +212,47 @@ def batch_update_device_status(device_ids: List[int], status: str, db: Session =
         failed_count=failed_count,
         failed_devices=failed_devices if failed_devices else None
     )
+
+
+@router.post("/{device_id}/test-connectivity")
+async def test_connectivity(device_id: int, db: Session = Depends(get_db)):
+    """
+    测试设备连接性
+    """
+    # 获取设备信息
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device with id {device_id} not found"
+        )
+    
+    # 获取Netmiko服务
+    netmiko_service = get_netmiko_service()
+    
+    # 连接测试
+    connection = await netmiko_service.connect_to_device(device)
+    
+    # 更新设备状态
+    if connection:
+        # 连接成功，状态设置为活跃
+        device.status = "active"
+        result = {
+            "success": True,
+            "message": f"设备 {device.hostname} 连接成功",
+            "status": "active"
+        }
+    else:
+        # 连接失败，状态设置为离线
+        device.status = "offline"
+        result = {
+            "success": False,
+            "message": f"设备 {device.hostname} 连接失败",
+            "status": "offline"
+        }
+    
+    # 保存状态更新
+    db.commit()
+    db.refresh(device)
+    
+    return result
