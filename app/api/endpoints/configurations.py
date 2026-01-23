@@ -331,16 +331,19 @@ async def collect_config_from_device(
         try:
             git_config = db.query(GitConfig).filter(GitConfig.is_active == True).first()
             if git_config:
-                if git_service.init_repo(git_config):
-                    commit_id = git_service.commit_config(
+                # 为每个设备创建新的GitService实例，避免单例模式下的资源冲突
+                from app.services.git_service import GitService
+                device_git_service = GitService()
+                if device_git_service.init_repo(git_config):
+                    commit_id = device_git_service.commit_config(
                         device.hostname,
                         config_content,
                         f"Auto-update config for {device.hostname} at {datetime.now()}"
                     )
                     if commit_id:
-                        git_service.push_to_remote()
+                        device_git_service.push_to_remote()
                         new_config.git_commit_id = commit_id
-                    git_service.close()
+                    device_git_service.close()
         except Exception as git_error:
             print(f"Git operation error: {str(git_error)}")
             # Git操作失败不影响配置获取，继续执行
@@ -482,10 +485,12 @@ def commit_config_to_git(
 
 
 @router.post("/backup-schedules", response_model=Dict[str, Any])
-def create_backup_schedule(
+async def create_backup_schedule(
     schedule: BackupScheduleCreate,
     db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
 ):
     """
     创建备份任务
@@ -502,14 +507,21 @@ def create_backup_schedule(
         db.commit()
         db.refresh(db_schedule)
         
-        # 添加到调度器
+        # 立即执行一次备份
+        backup_result = await collect_config_from_device(
+            schedule.device_id, db, netmiko_service, git_service
+        )
+        
+        # 备份完成后，将任务添加到调度器
         if db_schedule.is_active:
             backup_scheduler.add_schedule(db_schedule, db)
         
+        # 返回结果，包含备份结果
         return {
             "success": True,
-            "message": "Backup schedule created successfully",
-            "schedule_id": db_schedule.id
+            "message": "Backup schedule created successfully and initial backup completed",
+            "schedule_id": db_schedule.id,
+            "backup_result": backup_result
         }
     except Exception as e:
         print(f"Create backup schedule error: {str(e)}")
@@ -652,6 +664,118 @@ def delete_backup_schedule(
     except Exception as e:
         print(f"Delete backup schedule error: {str(e)}")
         return {"success": False, "message": f"Failed to delete backup schedule: {str(e)}"}
+
+
+@router.post("/backup-schedules/batch", response_model=dict)
+async def batch_create_backup_schedules(
+    request: dict,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    批量创建备份任务
+    """
+    import asyncio
+    
+    try:
+        device_ids = request.get("device_ids", [])
+        if not device_ids:
+            return {"success": False, "message": "No device ids provided"}
+        
+        backup_config = {
+            "schedule_type": request.get("schedule_type", "daily"),
+            "time": request.get("time"),
+            "day": request.get("day", 1),
+            "is_active": request.get("is_active", True)
+        }
+        
+        # 先创建所有备份任务记录
+        created_schedules = []
+        invalid_devices = []
+        
+        for device_id in device_ids:
+            try:
+                # 检查设备是否存在
+                device = db.query(Device).filter(Device.id == device_id).first()
+                if not device:
+                    invalid_devices.append(f"Device {device_id}: not found")
+                    continue
+                
+                # 创建备份任务记录
+                db_schedule = BackupSchedule(
+                    device_id=device_id,
+                    schedule_type=backup_config["schedule_type"],
+                    time=backup_config["time"],
+                    day=backup_config["day"],
+                    is_active=backup_config["is_active"]
+                )
+                db.add(db_schedule)
+                db.commit()
+                db.refresh(db_schedule)
+                
+                created_schedules.append(db_schedule)
+            except Exception as e:
+                invalid_devices.append(f"Device {device_id}: {str(e)}")
+        
+        # 并发执行所有设备的备份任务
+        async def backup_device(device_id):
+            try:
+                result = await collect_config_from_device(
+                    device_id, db, netmiko_service, git_service
+                )
+                return {"device_id": device_id, "success": result["success"], "message": result["message"]}
+            except Exception as e:
+                return {"device_id": device_id, "success": False, "message": str(e)}
+        
+        # 使用asyncio.gather并发执行，return_exceptions=True确保单个设备失败不影响整体
+        backup_results = await asyncio.gather(
+            *[backup_device(schedule.device_id) for schedule in created_schedules],
+            return_exceptions=True
+        )
+        
+        # 处理备份结果
+        backup_success_count = 0
+        backup_failed_count = 0
+        backup_failed_devices = []
+        
+        for i, result in enumerate(backup_results):
+            schedule = created_schedules[i]
+            if isinstance(result, Exception):
+                # 处理asyncio.gather返回的异常
+                backup_failed_count += 1
+                backup_failed_devices.append(f"Device {schedule.device_id}: {str(result)}")
+            else:
+                if result["success"]:
+                    backup_success_count += 1
+                else:
+                    backup_failed_count += 1
+                    backup_failed_devices.append(f"Device {result['device_id']}: {result['message']}")
+            
+            # 无论备份成功与否，都将任务添加到调度器
+            if schedule.is_active:
+                backup_scheduler.add_schedule(schedule, db)
+        
+        # 计算整体结果
+        total = len(device_ids)
+        schedule_success_count = len(created_schedules)
+        schedule_failed_count = len(invalid_devices)
+        
+        return {
+            "success": schedule_failed_count == 0,
+            "message": f"Batch create completed: {schedule_success_count} schedules created, {backup_success_count} backups succeeded, {backup_failed_count} backups failed",
+            "total": total,
+            "schedule_success_count": schedule_success_count,
+            "schedule_failed_count": schedule_failed_count,
+            "backup_success_count": backup_success_count,
+            "backup_failed_count": backup_failed_count,
+            "invalid_devices": invalid_devices if invalid_devices else None,
+            "backup_failed_devices": backup_failed_devices if backup_failed_devices else None
+        }
+    except Exception as e:
+        print(f"Batch create backup schedules error: {str(e)}")
+        return {"success": False, "message": f"Failed to create batch backup schedules: {str(e)}"}
 
 
 @router.post("/device/{device_id}/backup-now", response_model=Dict[str, Any])

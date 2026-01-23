@@ -210,14 +210,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import {
-  collectDeviceVersion,
-  collectDeviceSerial,
-  collectInterfacesInfo,
-  collectMacTable,
-  batchCollectDeviceInfo,
-  getMacAddresses
-} from '@/api/deviceCollection'
+import { deviceApi, deviceCollectionApi } from '@/api/index'
 
 // 数据状态
 const devices = ref([])
@@ -227,7 +220,8 @@ const loading = ref({
   serial: false,
   interfaces: false,
   macTable: false,
-  batch: false
+  batch: false,
+  devices: false
 })
 const collectionResults = ref([])
 const macTableData = ref([])
@@ -249,15 +243,23 @@ const searchForm = ref({
 // 方法
 const loadDevices = async () => {
   try {
-    // 这里需要调用设备列表API，暂时使用模拟数据
-    devices.value = [
-      { id: 1, hostname: 'SW-001', ip_address: '192.168.1.10', vendor: 'Cisco' },
-      { id: 2, hostname: 'SW-002', ip_address: '192.168.1.11', vendor: 'H3C' }
-    ]
+    loading.value.devices = true
+    // 调用设备列表API获取真实设备数据
+    const response = await deviceApi.getDevices()
+    devices.value = response || []
   } catch (error) {
     ElMessage.error('加载设备列表失败')
+    console.error('加载设备列表失败:', error)
+  } finally {
+    loading.value.devices = false
   }
 }
+
+// 生命周期钩子
+onMounted(() => {
+  // 页面加载时获取设备列表
+  loadDevices()
+})
 
 const addResult = (title, success, message, data = null) => {
   collectionResults.value.unshift({
@@ -272,7 +274,7 @@ const addResult = (title, success, message, data = null) => {
 const collectVersion = async () => {
   loading.value.version = true
   try {
-    const result = await collectDeviceVersion(selectedDeviceId.value)
+    const result = await deviceCollectionApi.collectDeviceVersion(selectedDeviceId.value)
     if (result.success) {
       addResult('版本信息采集', true, result.message, result.data)
       ElMessage.success('版本信息采集成功')
@@ -291,7 +293,7 @@ const collectVersion = async () => {
 const collectSerial = async () => {
   loading.value.serial = true
   try {
-    const result = await collectDeviceSerial(selectedDeviceId.value)
+    const result = await deviceCollectionApi.collectDeviceSerial(selectedDeviceId.value)
     if (result.success) {
       addResult('序列号采集', true, result.message, result.data)
       ElMessage.success('序列号采集成功')
@@ -310,7 +312,7 @@ const collectSerial = async () => {
 const collectInterfaces = async () => {
   loading.value.interfaces = true
   try {
-    const result = await collectInterfacesInfo(selectedDeviceId.value)
+    const result = await deviceCollectionApi.collectInterfacesInfo(selectedDeviceId.value)
     if (result.success) {
       addResult('接口信息采集', true, result.message, result.data)
       ElMessage.success('接口信息采集成功')
@@ -329,7 +331,7 @@ const collectInterfaces = async () => {
 const collectMacTableData = async () => {
   loading.value.macTable = true
   try {
-    const result = await collectMacTable(selectedDeviceId.value)
+    const result = await deviceCollectionApi.collectMacTable(selectedDeviceId.value)
     if (result.success) {
       addResult('MAC地址表采集', true, result.message, result.data)
       ElMessage.success('MAC地址表采集成功')
@@ -349,7 +351,7 @@ const collectMacTableData = async () => {
 
 const loadMacTableData = async () => {
   try {
-    const data = await getMacAddresses({ device_id: selectedDeviceId.value })
+    const data = await deviceCollectionApi.getMacAddresses({ device_id: selectedDeviceId.value })
     macTableData.value = data
   } catch (error) {
     console.error('加载MAC地址表失败:', error)
@@ -369,7 +371,7 @@ const executeBatchCollection = async () => {
 
   loading.value.batch = true
   try {
-    const result = await batchCollectDeviceInfo({
+    const result = await deviceCollectionApi.batchCollectDeviceInfo({
       device_ids: batchForm.value.deviceIds,
       collect_types: batchForm.value.collectTypes
     })

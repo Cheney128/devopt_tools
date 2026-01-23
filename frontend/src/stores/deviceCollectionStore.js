@@ -5,16 +5,7 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import {
-  collectDeviceVersion,
-  collectDeviceSerial,
-  collectInterfacesInfo,
-  collectMacTable,
-  batchCollectDeviceInfo,
-  getMacAddresses,
-  searchMacAddresses,
-  getDeviceMacAddresses
-} from '@/api/deviceCollection'
+import { deviceCollectionApi } from '@/api/index'
 
 export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   // 状态定义
@@ -62,7 +53,7 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   const collectVersion = async (deviceId) => {
     loading.value.version = true
     try {
-      const result = await collectDeviceVersion(deviceId)
+      const result = await deviceCollectionApi.collectDeviceVersion(deviceId)
       addResult('版本信息采集', result.success, result.message, result.data)
       return result
     } catch (error) {
@@ -76,7 +67,7 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   const collectSerial = async (deviceId) => {
     loading.value.serial = true
     try {
-      const result = await collectDeviceSerial(deviceId)
+      const result = await deviceCollectionApi.collectDeviceSerial(deviceId)
       addResult('序列号采集', result.success, result.message, result.data)
       return result
     } catch (error) {
@@ -90,7 +81,7 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   const collectInterfaces = async (deviceId) => {
     loading.value.interfaces = true
     try {
-      const result = await collectInterfacesInfo(deviceId)
+      const result = await deviceCollectionApi.collectInterfacesInfo(deviceId)
       addResult('接口信息采集', result.success, result.message, result.data)
       return result
     } catch (error) {
@@ -104,7 +95,7 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   const collectMacTable = async (deviceId) => {
     loading.value.macTable = true
     try {
-      const result = await collectMacTable(deviceId)
+      const result = await deviceCollectionApi.collectMacTable(deviceId)
       addResult('MAC地址表采集', result.success, result.message, result.data)
       if (result.success) {
         await loadMacTableData(deviceId)
@@ -122,7 +113,7 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   const batchCollect = async (deviceIds, collectTypes) => {
     loading.value.batch = true
     try {
-      const result = await batchCollectDeviceInfo({
+      const result = await deviceCollectionApi.batchCollectDeviceInfo({
         device_ids: deviceIds,
         collect_types: collectTypes
       })
@@ -140,7 +131,7 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   const loadMacTableData = async (deviceId, params = {}) => {
     loading.value.macAddresses = true
     try {
-      const data = await getDeviceMacAddresses(deviceId, params)
+      const data = await deviceCollectionApi.getDeviceMacAddresses(deviceId, params)
       macTableData.value = data
       currentDeviceId.value = deviceId
       return data
@@ -155,7 +146,7 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   const searchMacAddresses = async (macAddress) => {
     loading.value.macAddresses = true
     try {
-      const data = await searchMacAddresses(macAddress)
+      const data = await deviceCollectionApi.searchMacAddresses(macAddress)
       macTableData.value = data
       return data
     } catch (error) {
@@ -169,7 +160,7 @@ export const useDeviceCollectionStore = defineStore('deviceCollection', () => {
   const getAllMacAddresses = async (params = {}) => {
     loading.value.macAddresses = true
     try {
-      const data = await getMacAddresses(params)
+      const data = await deviceCollectionApi.getMacAddresses(params)
       macTableData.value = data
       return data
     } catch (error) {

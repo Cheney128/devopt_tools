@@ -104,14 +104,18 @@ async def collect_device_serial(
             detail=f"Device with id {device_id} not found"
         )
     
+    print(f"[API] Starting serial collection for device {device.hostname} (ID: {device_id})")
+    
     try:
         # 采集序列号
         serial = await netmiko_service.collect_device_serial(device)
         
         if not serial:
+            error_msg = f"Failed to collect serial number for device {device.hostname} ({device.ip_address})"
+            print(f"[API] {error_msg}")
             return DeviceCollectionResult(
                 success=False,
-                message=f"Failed to collect serial number for device {device.hostname}",
+                message=error_msg,
                 data=None
             )
         
@@ -119,16 +123,29 @@ async def collect_device_serial(
         device.sn = serial
         db.commit()
         
+        success_msg = f"Serial number collected successfully for device {device.hostname}"
+        print(f"[API] {success_msg}: {serial}")
+        
         return DeviceCollectionResult(
             success=True,
-            message=f"Serial number collected successfully for device {device.hostname}",
+            message=success_msg,
             data={"serial": serial}
         )
         
-    except Exception as e:
+    except asyncio.TimeoutError:
+        error_msg = f"Collection timed out for device {device.hostname} ({device.ip_address}). Please check device connectivity and try again."
+        print(f"[API ERROR] {error_msg}")
         return DeviceCollectionResult(
             success=False,
-            message=f"Error collecting serial number: {str(e)}",
+            message=error_msg,
+            data=None
+        )
+    except Exception as e:
+        error_msg = f"Error collecting serial number from device {device.hostname}: {str(e)}"
+        print(f"[API ERROR] {error_msg}")
+        return DeviceCollectionResult(
+            success=False,
+            message=error_msg,
             data=None
         )
 

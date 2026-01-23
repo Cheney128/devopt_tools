@@ -175,28 +175,40 @@ class NetmikoService:
         Returns:
             命令输出，失败返回None
         """
+        print(f"[INFO] Executing command {command} on device {device.hostname} ({device.ip_address})")
         connection = None
         try:
             connection = await self.connect_to_device(device)
             if not connection:
+                print(f"[ERROR] Failed to connect to device {device.hostname} ({device.ip_address}) for command execution")
                 return None
 
             loop = asyncio.get_event_loop()
             output = await loop.run_in_executor(
                 None,
-                lambda: connection.send_command(command, read_timeout=30)
+                lambda: connection.send_command(command, read_timeout=20)
             )
-
+            
+            print(f"[INFO] Command {command} executed successfully on device {device.hostname}")
             return output
+        except NetmikoTimeoutException:
+            print(f"[ERROR] Timeout executing command {command} on device {device.hostname} ({device.ip_address})")
+            return None
+        except NetmikoAuthenticationException:
+            print(f"[ERROR] Authentication failed for device {device.hostname} ({device.ip_address})")
+            return None
         except Exception as e:
-            print(f"Error executing command on device {device.hostname}: {e}")
+            print(f"[ERROR] Error executing command {command} on device {device.hostname} ({device.ip_address}): {e}")
+            import traceback
+            traceback.print_exc()
             return None
         finally:
             if connection:
                 try:
                     connection.disconnect()
-                except:
-                    pass
+                    print(f"[INFO] Disconnected from device {device.hostname} after command execution")
+                except Exception as e:
+                    print(f"[WARNING] Error disconnecting from device {device.hostname}: {e}")
 
     def parse_version_info(self, output: str, vendor: str) -> Dict[str, Any]:
         """
@@ -671,29 +683,81 @@ class NetmikoService:
         Returns:
             序列号字符串，失败返回None
         """
+        print(f"[INFO] Starting serial collection for device {device.hostname} ({device.ip_address})")
+        
         if not device.username or not device.password:
-            print(f"Device {device.hostname} missing credentials")
+            print(f"[ERROR] Device {device.hostname} ({device.ip_address}) missing credentials")
             return None
 
-        # 先从版本命令中尝试获取
-        version_command = self.get_commands(device.vendor, "version")
-        if version_command:
-            output = await self.execute_command(device, version_command)
-            if output:
-                serial = self.parse_serial_from_version(output, device.vendor)
-                if serial:
-                    return serial
+        connection = None
+        try:
+            # 建立一次连接，执行多个命令
+            connection = await self.connect_to_device(device)
+            if not connection:
+                print(f"[ERROR] Failed to connect to device {device.hostname} ({device.ip_address}) for serial collection")
+                return None
 
-        # 如果版本命令中没有，尝试inventory命令
-        inventory_command = self.get_commands(device.vendor, "inventory")
-        if inventory_command:
-            output = await self.execute_command(device, inventory_command)
-            if output:
-                serial = self.parse_serial_from_inventory(output, device.vendor)
-                if serial:
-                    return serial
+            loop = asyncio.get_event_loop()
+            
+            # 先从版本命令中尝试获取
+            version_command = self.get_commands(device.vendor, "version")
+            if version_command:
+                print(f"[INFO] Executing version command on {device.hostname}: {version_command}")
+                try:
+                    output = await loop.run_in_executor(
+                        None,
+                        lambda: connection.send_command(version_command, read_timeout=20)
+                    )
+                    if output:
+                        print(f"[INFO] Version command output received from {device.hostname}")
+                        serial = self.parse_serial_from_version(output, device.vendor)
+                        if serial:
+                            print(f"[SUCCESS] Found serial from version output: {serial} for {device.hostname}")
+                            return serial
+                        else:
+                            print(f"[INFO] Serial not found in version output for {device.hostname}")
+                    else:
+                        print(f"[WARNING] Version command returned empty output for {device.hostname}")
+                except Exception as e:
+                    print(f"[ERROR] Error executing version command on {device.hostname}: {e}")
 
-        return None
+            # 如果版本命令中没有，尝试inventory命令
+            inventory_command = self.get_commands(device.vendor, "inventory")
+            if inventory_command:
+                print(f"[INFO] Executing inventory command on {device.hostname}: {inventory_command}")
+                try:
+                    output = await loop.run_in_executor(
+                        None,
+                        lambda: connection.send_command(inventory_command, read_timeout=20)
+                    )
+                    if output:
+                        print(f"[INFO] Inventory command output received from {device.hostname}")
+                        serial = self.parse_serial_from_inventory(output, device.vendor)
+                        if serial:
+                            print(f"[SUCCESS] Found serial from inventory output: {serial} for {device.hostname}")
+                            return serial
+                        else:
+                            print(f"[INFO] Serial not found in inventory output for {device.hostname}")
+                    else:
+                        print(f"[WARNING] Inventory command returned empty output for {device.hostname}")
+                except Exception as e:
+                    print(f"[ERROR] Error executing inventory command on {device.hostname}: {e}")
+
+            print(f"[ERROR] No serial found for device {device.hostname} ({device.ip_address})")
+            return None
+            
+        except Exception as e:
+            print(f"[ERROR] Unexpected error collecting serial for device {device.hostname} ({device.ip_address}): {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+        finally:
+            if connection:
+                try:
+                    connection.disconnect()
+                    print(f"[INFO] Disconnected from device {device.hostname}")
+                except Exception as e:
+                    print(f"[WARNING] Error disconnecting from device {device.hostname}: {e}")
 
     async def collect_interfaces_info(self, device: Device) -> Optional[List[Dict[str, Any]]]:
         """
@@ -713,24 +777,56 @@ class NetmikoService:
         if not interfaces_command:
             return None
 
-        # 先获取接口详细信息
-        interfaces_output = await self.execute_command(device, interfaces_command)
-        if not interfaces_output:
+        connection = None
+        try:
+            # 建立一次连接，执行多个命令
+            connection = await self.connect_to_device(device)
+            if not connection:
+                print(f"Failed to connect to device {device.hostname} for interface collection")
+                return None
+
+            loop = asyncio.get_event_loop()
+            
+            # 获取接口详细信息
+            print(f"Executing interfaces command on {device.hostname}: {interfaces_command}")
+            interfaces_output = await loop.run_in_executor(
+                None,
+                lambda: connection.send_command(interfaces_command, read_timeout=30)
+            )
+            
+            if not interfaces_output:
+                print(f"No interfaces output received from {device.hostname}")
+                return None
+
+            # 如果有状态命令，也获取状态信息
+            status_output = None
+            status_command = self.get_commands(device.vendor, "interfaces_status")
+            if status_command and status_command != interfaces_command:
+                print(f"Executing interfaces status command on {device.hostname}: {status_command}")
+                status_output = await loop.run_in_executor(
+                    None,
+                    lambda: connection.send_command(status_command, read_timeout=30)
+                )
+
+            interfaces_info = self.parse_interfaces_info(interfaces_output, status_output, device.vendor)
+
+            # 添加device_id到每个接口
+            for interface in interfaces_info:
+                interface["device_id"] = device.id
+
+            print(f"Collected {len(interfaces_info)} interfaces from {device.hostname}")
+            return interfaces_info if interfaces_info else None
+            
+        except Exception as e:
+            print(f"Error collecting interfaces for device {device.hostname}: {e}")
             return None
-
-        # 如果有状态命令，也获取状态信息
-        status_output = None
-        status_command = self.get_commands(device.vendor, "interfaces_status")
-        if status_command and status_command != interfaces_command:
-            status_output = await self.execute_command(device, status_command)
-
-        interfaces_info = self.parse_interfaces_info(interfaces_output, status_output, device.vendor)
-
-        # 添加device_id到每个接口
-        for interface in interfaces_info:
-            interface["device_id"] = device.id
-
-        return interfaces_info if interfaces_info else None
+        finally:
+            if connection:
+                try:
+                    connection.disconnect()
+                    print(f"Disconnected from device {device.hostname}")
+                except:
+                    pass
 
     async def collect_mac_table(self, device: Device) -> Optional[List[Dict[str, Any]]]:
         """

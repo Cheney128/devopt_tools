@@ -3,7 +3,7 @@ import axios from 'axios'
 // 创建axios实例
 const api = axios.create({
   baseURL: 'http://localhost:8000/api/v1',
-  timeout: 35000,
+  timeout: 60000,
   headers: {
     'Content-Type': 'application/json'
   }
@@ -90,11 +90,12 @@ export const configurationApi = {
   getConfigDiff: (configId1, configId2) => api.get(`/configurations/diff/${configId1}/${configId2}`),
   commitConfigToGit: (id) => api.post(`/configurations/${id}/commit-git`),
   // 备份相关API
-  createBackupSchedule: (data) => api.post('/configurations/backup-schedules', data),
-  getBackupSchedules: (params) => api.get('/configurations/backup-schedules', { params }),
-  updateBackupSchedule: (id, data) => api.put(`/configurations/backup-schedules/${id}`, data),
-  deleteBackupSchedule: (id) => api.delete(`/configurations/backup-schedules/${id}`),
-  backupNow: (deviceId) => api.post(`/configurations/device/${deviceId}/backup-now`)
+    createBackupSchedule: (data) => api.post('/configurations/backup-schedules', data),
+    getBackupSchedules: (params) => api.get('/configurations/backup-schedules', { params }),
+    updateBackupSchedule: (id, data) => api.put(`/configurations/backup-schedules/${id}`, data),
+    deleteBackupSchedule: (id) => api.delete(`/configurations/backup-schedules/${id}`),
+    batchCreateBackupSchedules: (deviceIds, data) => api.post('/configurations/backup-schedules/batch', { device_ids: deviceIds, ...data }),
+    backupNow: (deviceId) => api.post(`/configurations/device/${deviceId}/backup-now`)
 }
 
 // Git配置API
@@ -106,6 +107,26 @@ export const gitConfigApi = {
   deleteGitConfig: (id) => api.delete(`/git-configs/${id}`),
   testGitConnection: (id) => api.post(`/git-configs/${id}/test`),
   setActiveGitConfig: (id) => api.post(`/git-configs/active/${id}`)
+}
+
+// 设备采集API
+export const deviceCollectionApi = {
+  // 采集设备版本信息
+  collectDeviceVersion: (deviceId) => api.post(`/device-collection/${deviceId}/collect/version`),
+  // 采集设备序列号
+  collectDeviceSerial: (deviceId) => api.post(`/device-collection/${deviceId}/collect/serial`),
+  // 采集接口信息
+  collectInterfacesInfo: (deviceId) => api.post(`/device-collection/${deviceId}/collect/interfaces`),
+  // 采集MAC地址表
+  collectMacTable: (deviceId) => api.post(`/device-collection/${deviceId}/collect/mac-table`),
+  // 批量采集设备信息
+  batchCollectDeviceInfo: (data) => api.post('/device-collection/batch/collect', data),
+  // 获取MAC地址表
+  getMacAddresses: (params = {}) => api.get('/device-collection/mac-addresses', { params }),
+  // 搜索MAC地址
+  searchMacAddresses: (macAddress) => api.post('/device-collection/mac-addresses/search', { mac_address: macAddress }),
+  // 获取指定设备的MAC地址表
+  getDeviceMacAddresses: (deviceId, params = {}) => api.get(`/device-collection/${deviceId}/mac-addresses`, { params })
 }
 
 export default api
