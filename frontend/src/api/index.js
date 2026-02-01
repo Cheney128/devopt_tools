@@ -34,6 +34,24 @@ export const deviceApi = {
   batchDeleteDevices: (ids) => api.post('/devices/batch/delete', ids),
   batchUpdateStatus: (ids, status) => api.post('/devices/batch/update-status', ids, { params: { status } }),
   testConnectivity: (id) => api.post(`/devices/${id}/test-connectivity`),
+  // 执行设备命令
+  executeCommand: (id, command, variables = {}, templateId = null) => api.post(`/devices/${id}/execute-command`, { command, variables, template_id: templateId }),
+  // 批量执行设备命令
+  batchExecuteCommand: (ids, command, variables = {}, templateId = null) => api.post('/devices/batch/execute-command', { device_ids: ids, command, variables, template_id: templateId }),
+  
+  // 命令模板API
+  getCommandTemplates: (params = {}) => api.get('/command-templates', { params }),
+  getCommandTemplate: (id) => api.get(`/command-templates/${id}`),
+  createCommandTemplate: (data) => api.post('/command-templates', data),
+  updateCommandTemplate: (id, data) => api.put(`/command-templates/${id}`, data),
+  deleteCommandTemplate: (id) => api.delete(`/command-templates/${id}`),
+  
+  // 命令历史API
+  getCommandHistory: (params = {}) => api.get('/command-history', { params }),
+  getDeviceCommandHistory: (deviceId, params = {}) => api.get(`/command-history/device/${deviceId}`, { params }),
+  deleteCommandHistory: (id) => api.delete(`/command-history/${id}`),
+  deleteDeviceCommandHistory: (deviceId) => api.delete(`/command-history/device/${deviceId}`),
+  deleteOldCommandHistory: (days = 30) => api.delete('/command-history', { params: { days } }),
   // 批量导入设备
   batchImportDevices: (file, skipExisting = false) => {
     const formData = new FormData()

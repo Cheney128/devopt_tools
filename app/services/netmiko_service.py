@@ -118,92 +118,334 @@ class NetmikoService:
         vendor_commands = self.COMMAND_MAPPING.get(vendor_lower, self.COMMAND_MAPPING["cisco"])
         return vendor_commands.get(command_type, "")
 
-    async def connect_to_device(self, device: Device) -> Optional[Any]:
+    async def connect_to_device(self, device: Device, retry_count: int = None) -> Optional[Any]:
         """
-        连接到设备
+        连接到设备（带重试机制）
 
         Args:
             device: 设备对象
+            retry_count: 重试次数，None表示使用默认值
 
         Returns:
             Netmiko连接对象，失败返回None
         """
         if not NETMIKO_AVAILABLE:
-            print("Warning: Netmiko is not installed")
+            print("[ERROR] Netmiko is not installed")
             return None
 
         device_type = self.get_device_type(device.vendor)
+        max_retries = retry_count if retry_count is not None else self.max_retries
 
+        print(f"[INFO] Attempting to connect to device {device.hostname} ({device.ip_address})")
+        print(f"[INFO] Device type: {device_type}, Max retries: {max_retries}")
+
+        for attempt in range(1, max_retries + 1):
+            try:
+                device_params = self._build_device_params(device, device_type)
+                
+                print(f"[INFO] Connection attempt {attempt}/{max_retries} for device {device.hostname}")
+                
+                # 在异步环境中运行同步的netmiko连接
+                loop = asyncio.get_event_loop()
+                connection = await loop.run_in_executor(
+                    None,
+                    lambda: ConnectHandler(**device_params)
+                )
+                
+                print(f"[SUCCESS] Successfully connected to device {device.hostname} on attempt {attempt}")
+                return connection
+                
+            except NetmikoAuthenticationException as e:
+                print(f"[ERROR] Authentication failed for device {device.hostname} on attempt {attempt}: {e}")
+                print(f"[ERROR] Common causes: 1) Invalid username/password, 2) Incorrect SSH key, 3) Wrong device")
+                
+                # 认证失败不需要重试
+                if attempt == max_retries:
+                    print(f"[ERROR] All {max_retries} authentication attempts failed for device {device.hostname}")
+                return None
+                
+            except NetmikoTimeoutException as e:
+                print(f"[ERROR] Connection timeout for device {device.hostname} on attempt {attempt}: {e}")
+                print(f"[ERROR] Common causes: 1) Network unreachable, 2) Firewall blocking, 3) Wrong IP/port")
+                
+                # 最后一次尝试失败
+                if attempt == max_retries:
+                    print(f"[ERROR] All {max_retries} connection attempts timed out for device {device.hostname}")
+                    return None
+                
+                # 等待一段时间后重试（指数退避）
+                wait_time = min(2 ** attempt, 10)  # 最多等待10秒
+                print(f"[INFO] Waiting {wait_time} seconds before retry...")
+                await asyncio.sleep(wait_time)
+                
+            except Exception as e:
+                print(f"[ERROR] Unexpected error connecting to device {device.hostname} on attempt {attempt}: {e}")
+                print(f"[ERROR] Error type: {type(e).__name__}")
+                
+                # 最后一次尝试失败
+                if attempt == max_retries:
+                    print(f"[ERROR] All {max_retries} connection attempts failed for device {device.hostname}")
+                    import traceback
+                    traceback.print_exc()
+                    return None
+                
+                # 等待一段时间后重试
+                wait_time = min(2 ** attempt, 10)
+                print(f"[INFO] Waiting {wait_time} seconds before retry...")
+                await asyncio.sleep(wait_time)
+        
+        return None
+
+    def _build_device_params(self, device: Device, device_type: str) -> dict:
+        """
+        构建设备连接参数
+
+        Args:
+            device: 设备对象
+            device_type: 设备类型
+
+        Returns:
+            设备连接参数字典
+        """
         device_params = {
             "device_type": device_type,
             "host": device.ip_address,
             "username": device.username,
-            "password": device.password,
             "port": device.login_port,
             "timeout": self.timeout,
-            "conn_timeout": self.conn_timeout,  # 增加连接超时时间
+            "conn_timeout": self.conn_timeout,
             "session_log": None,  # 禁用会话日志以提高性能
+            "allow_agent": False,  # 禁用SSH代理
+            "global_delay_factor": 2,  # 增加全局延迟因子
+            "fast_cli": False,  # 禁用快速CLI模式
         }
 
+        # 根据认证方式设置不同的参数
+        if device.password:
+            device_params["password"] = device.password
+        
+        # 支持密钥认证（如果设备对象有private_key属性）
+        if hasattr(device, 'private_key') and device.private_key:
+            device_params["use_keys"] = True
+            device_params["key_file"] = device.private_key
+        
+        # 支持passphrase（如果设备对象有passphrase属性）
+        if hasattr(device, 'passphrase') and device.passphrase:
+            device_params["passphrase"] = device.passphrase
+        
         # 如果是telnet连接
         if device.login_method.lower() == "telnet":
             device_params["device_type"] = device_type.replace("ssh", "telnet")
+        # 如果是console连接
+        elif device.login_method.lower() == "console":
+            device_params["device_type"] = f"{device_type}_console"
+        
+        return device_params
 
-        try:
-            # 在异步环境中运行同步的netmiko连接
-            loop = asyncio.get_event_loop()
-            connection = await loop.run_in_executor(
-                None,
-                lambda: ConnectHandler(**device_params)
-            )
-            return connection
-        except (NetmikoTimeoutException, NetmikoAuthenticationException) as e:
-            print(f"Connection error for device {device.hostname}: {e}")
-            return None
-        except Exception as e:
-            print(f"Unexpected error connecting to device {device.hostname}: {e}")
-            return None
-
-    async def execute_command(self, device: Device, command: str) -> Optional[str]:
+    def _is_config_command(self, command: str, vendor: str) -> bool:
         """
-        在设备上执行命令
+        判断命令是否为配置命令（需要进入配置模式）
+
+        Args:
+            command: 命令字符串
+            vendor: 设备厂商
+
+        Returns:
+            bool: 是否为配置命令
+        """
+        config_keywords = [
+            'system-view', 'sysname', 'interface', 'vlan', 'ip address',
+            'route', 'acl', 'commit', 'quit', 'return', 'undo',
+            'description', 'shutdown', 'undo shutdown'
+        ]
+        command_lower = command.lower().strip()
+        return any(keyword in command_lower for keyword in config_keywords)
+
+    def _get_vendor_expect_strings(self, vendor: str) -> dict:
+        """
+        获取厂商特定的expect字符串
+
+        Args:
+            vendor: 设备厂商
+
+        Returns:
+            dict: 包含各种模式的expect字符串
+        """
+        vendor_lower = vendor.lower().strip() if vendor else "cisco"
+
+        if vendor_lower in ['huawei', 'h3c', '华为', '华三']:
+            return {
+                'user_view': r'<.*>',           # 用户视图: <hostname>
+                'system_view': r'\[.*\]',       # 系统视图: [~hostname] 或 [hostname]
+                'config_view': r'\[.*\]',       # 配置视图
+                'any_view': r'[<>\[].*[>\]]'    # 任意视图
+            }
+        elif vendor_lower in ['cisco', 'ruijie', '锐捷']:
+            return {
+                'user_view': r'.*#',            # 特权模式: hostname#
+                'config_view': r'\(config.*\)#', # 配置模式: hostname(config)#
+                'any_view': r'.*[#>]'
+            }
+        else:
+            # 默认使用Cisco风格
+            return {
+                'user_view': r'.*#',
+                'config_view': r'\(config.*\)#',
+                'any_view': r'.*[#>]'
+            }
+
+    async def execute_command(self, device: Device, command: str, expect_string: Optional[str] = None, read_timeout: int = 20) -> Optional[str]:
+        """
+        在设备上执行命令（带增强的错误处理）
 
         Args:
             device: 设备对象
             command: 要执行的命令
+            expect_string: 预期的提示符字符串，用于判断命令执行完成
+            read_timeout: 命令执行超时时间（秒）
 
         Returns:
             命令输出，失败返回None
         """
-        print(f"[INFO] Executing command {command} on device {device.hostname} ({device.ip_address})")
+        from app.services.ssh_connection_pool import get_ssh_connection_pool
+
+        print(f"[INFO] Executing command '{command}' on device {device.hostname} ({device.ip_address})")
+        print(f"[INFO] Command timeout: {read_timeout}s, Expect string: {expect_string}")
+
+        ssh_conn_pool = get_ssh_connection_pool()
         connection = None
+        ssh_connection = None
+
         try:
-            connection = await self.connect_to_device(device)
+            # 从连接池获取连接
+            ssh_connection = await ssh_conn_pool.get_connection(device)
+            if ssh_connection:
+                connection = ssh_connection.connection
+                print(f"[INFO] Got connection from pool for device {device.hostname}")
+            else:
+                # 连接池获取失败，尝试直接连接
+                print(f"[INFO] Failed to get connection from pool, trying direct connection")
+                connection = await self.connect_to_device(device)
+
             if not connection:
                 print(f"[ERROR] Failed to connect to device {device.hostname} ({device.ip_address}) for command execution")
+                print(f"[ERROR] Please check:")
+                print(f"[ERROR]   1. Device IP address: {device.ip_address}")
+                print(f"[ERROR]   2. Device SSH port: {device.login_port}")
+                print(f"[ERROR]   3. Device username: {device.username}")
+                print(f"[ERROR]   4. Device password: {'*' * len(device.password) if device.password else 'Not set'}")
+                print(f"[ERROR]   5. Network connectivity (try: ping {device.ip_address})")
+                print(f"[ERROR]   6. Device SSH service status")
+                print(f"[ERROR]   7. Firewall rules")
                 return None
 
             loop = asyncio.get_event_loop()
-            output = await loop.run_in_executor(
-                None,
-                lambda: connection.send_command(command, read_timeout=20)
-            )
-            
-            print(f"[INFO] Command {command} executed successfully on device {device.hostname}")
-            return output
-        except NetmikoTimeoutException:
-            print(f"[ERROR] Timeout executing command {command} on device {device.hostname} ({device.ip_address})")
+
+            # 获取厂商特定的expect字符串
+            vendor_expects = self._get_vendor_expect_strings(device.vendor)
+
+            # 判断是否为配置命令
+            is_config_cmd = self._is_config_command(command, device.vendor)
+
+            try:
+                # 如果用户提供了expect_string，使用用户提供的
+                if expect_string:
+                    print(f"[INFO] Sending command with user-provided expect_string: {expect_string}")
+                    output = await loop.run_in_executor(
+                        None,
+                        lambda: connection.send_command(command, expect_string=expect_string, read_timeout=read_timeout)
+                    )
+                elif is_config_cmd:
+                    # 对于配置命令，使用send_config_set方法
+                    print(f"[INFO] Detected config command, using send_config_set")
+                    try:
+                        # 尝试使用send_config_set执行配置命令
+                        output = await loop.run_in_executor(
+                            None,
+                            lambda: connection.send_config_set(
+                                [command],
+                                exit_config_mode=False,  # 不自动退出配置模式
+                                read_timeout=read_timeout
+                            )
+                        )
+                    except Exception as config_e:
+                        print(f"[WARNING] send_config_set failed: {config_e}, trying send_command with expect_string")
+                        # 如果send_config_set失败，回退到send_command
+                        output = await loop.run_in_executor(
+                            None,
+                            lambda: connection.send_command(
+                                command,
+                                expect_string=vendor_expects['any_view'],
+                                read_timeout=read_timeout
+                            )
+                        )
+                else:
+                    # 普通查询命令，使用默认方式
+                    print(f"[INFO] Sending command without expect_string (query command)")
+                    output = await loop.run_in_executor(
+                        None,
+                        lambda: connection.send_command(command, read_timeout=read_timeout)
+                    )
+
+                if output:
+                    print(f"[SUCCESS] Command '{command}' executed successfully on device {device.hostname}")
+                    print(f"[INFO] Output length: {len(output)} characters")
+                else:
+                    print(f"[WARNING] Command '{command}' returned empty output on device {device.hostname}")
+
+                return output
+
+            except NetmikoTimeoutException as e:
+                print(f"[ERROR] Timeout executing command '{command}' on device {device.hostname} ({device.ip_address})")
+                print(f"[ERROR] Timeout value: {read_timeout}s")
+                print(f"[ERROR] Possible causes:")
+                print(f"[ERROR]   1. Command execution takes too long")
+                print(f"[ERROR]   2. Device is busy")
+                print(f"[ERROR]   3. Network latency")
+                print(f"[ERROR]   4. Prompt pattern not detected (try using expect_string)")
+                return None
+
+            except Exception as e:
+                print(f"[ERROR] Error sending command '{command}' to device {device.hostname}: {e}")
+                print(f"[ERROR] Error type: {type(e).__name__}")
+                import traceback
+                traceback.print_exc()
+                return None
+
+        except NetmikoTimeoutException as e:
+            print(f"[ERROR] Connection timeout for device {device.hostname} ({device.ip_address})")
+            print(f"[ERROR] Connection timeout: {self.conn_timeout}s")
+            print(f"[ERROR] Possible causes:")
+            print(f"[ERROR]   1. Network unreachable")
+            print(f"[ERROR]   2. Firewall blocking connection")
+            print(f"[ERROR]   3. Wrong IP address or port")
+            print(f"[ERROR]   4. Device SSH service not running")
             return None
-        except NetmikoAuthenticationException:
+
+        except NetmikoAuthenticationException as e:
             print(f"[ERROR] Authentication failed for device {device.hostname} ({device.ip_address})")
+            print(f"[ERROR] Possible causes:")
+            print(f"[ERROR]   1. Invalid username: {device.username}")
+            print(f"[ERROR]   2. Invalid password")
+            print(f"[ERROR]   3. Account locked or disabled")
+            print(f"[ERROR]   4. Device requires special authentication method")
             return None
+
         except Exception as e:
-            print(f"[ERROR] Error executing command {command} on device {device.hostname} ({device.ip_address}): {e}")
+            print(f"[ERROR] Unexpected error executing command '{command}' on device {device.hostname} ({device.ip_address}): {e}")
+            print(f"[ERROR] Error type: {type(e).__name__}")
+            print(f"[ERROR] Error message: {str(e)}")
             import traceback
             traceback.print_exc()
             return None
+
         finally:
-            if connection:
+            if ssh_connection:
+                # 如果是从连接池获取的连接，只需释放回连接池
+                await ssh_conn_pool.release_connection(ssh_connection)
+                print(f"[INFO] Released connection back to pool for device {device.hostname}")
+            elif connection:
+                # 如果是直接创建的连接，需要关闭
                 try:
                     connection.disconnect()
                     print(f"[INFO] Disconnected from device {device.hostname} after command execution")

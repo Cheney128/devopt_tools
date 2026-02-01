@@ -1,7 +1,7 @@
 <script setup>
-import { ref, onMounted, computed } from 'vue'
-import { ElMessage, ElMessageBox, ElUpload, ElButton, ElIcon, ElDialog, ElForm, ElFormItem } from 'element-plus'
-import { Plus, Delete, ArrowDown, Upload, Download } from '@element-plus/icons-vue'
+import { ref, reactive, onMounted, computed } from 'vue'
+import { ElMessage, ElMessageBox, ElUpload, ElButton, ElIcon, ElDialog, ElForm, ElFormItem, ElInput, ElTable, ElTableColumn, ElSelect, ElOption, ElCollapse, ElCollapseItem, ElTag, ElDropdown, ElDropdownMenu, ElDropdownItem, ElScrollbar } from 'element-plus'
+import { Plus, Delete, ArrowDown, Upload, Download, Search } from '@element-plus/icons-vue'
 import { useDeviceStore } from '../stores/deviceStore'
 import { deviceApi } from '../api/index'
 
@@ -55,10 +55,6 @@ const formRules = ref({
 })
 const multipleSelection = ref([])
 const currentDeviceId = ref(null)
-const searchForm = ref({
-  status: '',
-  vendor: ''
-})
 
 // 计算属性
 const isAllSelected = computed(() => {
@@ -72,7 +68,7 @@ const isIndeterminate = computed(() => {
 // 方法
 const fetchDevices = async () => {
   loading.value = true
-  await deviceStore.fetchDevices(searchForm.value)
+  await deviceStore.fetchDevices()
   loading.value = false
 }
 
@@ -81,10 +77,23 @@ const handleSearch = () => {
 }
 
 const handleReset = () => {
-  searchForm.value = {
-    status: '',
-    vendor: ''
-  }
+  deviceStore.resetSearchForm()
+  fetchDevices()
+}
+
+const handleSizeChange = (newSize) => {
+  deviceStore.setPageSize(newSize)
+  fetchDevices()
+}
+
+const handleCurrentChange = (newPage) => {
+  deviceStore.setCurrentPage(newPage)
+  fetchDevices()
+}
+
+// 监听搜索表单变化，自动更新设备列表
+const updateSearchForm = (field, value) => {
+  deviceStore.updateSearchForm({ [field]: value })
   fetchDevices()
 }
 
@@ -256,6 +265,193 @@ const uploadLoading = ref(false)
 const fileList = ref([])
 const skipExisting = ref(false)
 
+// 命令执行相关
+const commandDialogVisible = ref(false)
+const commandDialogTitle = ref('执行命令')
+const command = ref('')
+const commandLoading = ref(false)
+const currentCommandDeviceId = ref(null)
+const selectedDevicesForCommand = ref([])
+const commandResultVisible = ref(false)
+const commandResult = ref('')
+const batchCommandResultVisible = ref(false)
+const batchCommandResults = ref([])
+
+// 命令模板相关
+const commandTemplates = ref([])
+const selectedTemplate = ref(null)
+const templateVariables = ref({})
+const showVariables = ref(false)
+const activeCollapseNames = ref(['variables'])
+
+// 命令历史相关
+const commandHistory = ref([])
+const maxHistoryItems = 20
+const showCommandHistory = ref(false)
+const historyIndex = ref(-1)
+const tempCommand = ref('')
+
+// 标签页相关
+const activeTab = ref('execute')
+
+// 模板管理相关
+const templateSearchKeyword = ref('')
+const templateLoading = ref(false)
+const templateFormVisible = ref(false)
+const templateFormTitle = ref('新建模板')
+const templateForm = ref({
+  name: '',
+  command: '',
+  vendor: '',
+  description: '',
+  variables: {},
+  variablesStr: ''
+})
+const templateFormRef = ref(null)
+const templateFormLoading = ref(false)
+const templateFormRules = ref({
+  name: [{ required: true, message: '请输入模板名称', trigger: 'blur' }],
+  command: [{ required: true, message: '请输入命令内容', trigger: 'blur' }]
+})
+
+// 计算属性：过滤后的模板列表
+const filteredTemplates = computed(() => {
+  if (!templateSearchKeyword.value) {
+    return commandTemplates.value
+  }
+  const keyword = templateSearchKeyword.value.toLowerCase()
+  return commandTemplates.value.filter(template => {
+    return template.name.toLowerCase().includes(keyword) ||
+           template.command.toLowerCase().includes(keyword) ||
+           (template.description && template.description.toLowerCase().includes(keyword)) ||
+           (template.vendor && template.vendor.toLowerCase().includes(keyword))
+  })
+})
+
+// 标签页切换处理
+const handleTabChange = (tab) => {
+  // 如果切换到模板管理标签页，重新加载模板列表
+  if (tab === 'templates') {
+    loadCommandTemplates()
+  }
+}
+
+// 模板搜索处理
+const handleTemplateSearch = () => {
+  // 搜索逻辑通过计算属性自动处理
+}
+
+// 创建模板处理
+const handleCreateTemplate = () => {
+  templateFormTitle.value = '新建模板'
+  templateForm.value = {
+    name: '',
+    command: '',
+    vendor: '',
+    description: '',
+    variables: {},
+    variablesStr: ''
+  }
+  templateFormVisible.value = true
+}
+
+// 编辑模板处理
+const handleEditTemplate = (template) => {
+  templateFormTitle.value = '编辑模板'
+  templateForm.value = {
+    name: template.name,
+    command: template.command,
+    vendor: template.vendor,
+    description: template.description,
+    variables: template.variables || {},
+    variablesStr: JSON.stringify(template.variables || {}, null, 2)
+  }
+  templateFormVisible.value = true
+}
+
+// 删除模板处理
+const handleDeleteTemplate = async (template) => {
+  try {
+    await ElMessageBox.confirm(`确定要删除模板 ${template.name} 吗？`, '警告', {
+      confirmButtonText: '确定',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+    
+    await deviceApi.deleteCommandTemplate(template.id)
+    ElMessage.success('删除成功')
+    
+    // 重新加载模板列表
+    await loadCommandTemplates()
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('删除失败')
+      console.error('删除模板失败:', error)
+    }
+  }
+}
+
+// 提交模板表单
+const handleSubmitTemplateForm = async () => {
+  if (!templateFormRef.value) return
+  
+  try {
+    templateFormLoading.value = true // 添加加载状态
+    await templateFormRef.value.validate()
+    
+    // 验证变量定义JSON格式
+    let variables = {}
+    if (templateForm.value.variablesStr) {
+      try {
+        variables = JSON.parse(templateForm.value.variablesStr)
+      } catch (e) {
+        ElMessage.error('变量定义格式错误，请输入有效的JSON格式')
+        return
+      }
+    }
+    
+    const templateData = {
+      name: templateForm.value.name,
+      command: templateForm.value.command,
+      vendor: templateForm.value.vendor,
+      description: templateForm.value.description,
+      variables: variables
+    }
+    
+    // 提交API请求
+    if (templateForm.value.id) {
+      // 更新模板
+      await deviceApi.updateCommandTemplate(templateForm.value.id, templateData)
+      ElMessage.success('更新成功')
+    } else {
+      // 创建模板
+      await deviceApi.createCommandTemplate(templateData)
+      ElMessage.success('创建成功')
+    }
+    
+    // 关闭对话框并重新加载模板列表
+    templateFormVisible.value = false
+    await loadCommandTemplates()
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('提交模板表单失败:', error)
+      // 添加用户友好的错误提示
+      let errorMsg = '操作失败，请稍后重试'
+      if (error.response && error.response.data) {
+        // API返回了错误信息
+        const data = error.response.data
+        errorMsg = data.message || data.detail || errorMsg
+      } else if (error.message) {
+        // 其他类型的错误
+        errorMsg = error.message
+      }
+      ElMessage.error(errorMsg)
+    }
+  } finally {
+    templateFormLoading.value = false // 无论成功失败都关闭加载状态
+  }
+}
+
 // 下载模板
 const handleDownloadTemplate = async () => {
   try {
@@ -309,9 +505,199 @@ const beforeUpload = (file) => {
   return false // 阻止默认上传，使用手动上传
 }
 
+// 加载命令模板
+const loadCommandTemplates = async () => {
+  try {
+    const result = await deviceApi.getCommandTemplates()
+    if (result.data && result.data.items) {
+      commandTemplates.value = result.data.items
+    }
+  } catch (error) {
+    console.error('加载命令模板失败:', error)
+    ElMessage.error('加载命令模板失败')
+  }
+}
+
+// 处理单个设备命令执行
+const handleExecuteCommand = async (device) => {
+  commandDialogTitle.value = `执行命令 - ${device.hostname}`
+  currentCommandDeviceId.value = device.id
+  selectedDevicesForCommand.value = []
+  command.value = ''
+  selectedTemplate.value = null
+  templateVariables.value = {}
+  showVariables.value = false
+  commandResult.value = ''
+  
+  // 加载命令模板
+  await loadCommandTemplates()
+  
+  commandDialogVisible.value = true
+}
+
+// 处理批量命令执行
+const handleBatchExecuteCommand = async () => {
+  if (multipleSelection.value.length === 0) {
+    ElMessage.warning('请选择要执行命令的设备')
+    return
+  }
+  commandDialogTitle.value = `批量执行命令 - ${multipleSelection.value.length} 台设备`
+  currentCommandDeviceId.value = null
+  selectedDevicesForCommand.value = multipleSelection.value.map(device => device.id)
+  command.value = ''
+  selectedTemplate.value = null
+  templateVariables.value = {}
+  showVariables.value = false
+  commandResult.value = ''
+  batchCommandResults.value = []
+  
+  // 加载命令模板
+  await loadCommandTemplates()
+  
+  commandDialogVisible.value = true
+}
+
+// 处理模板选择变化
+const handleTemplateChange = (template) => {
+  selectedTemplate.value = template
+  if (template) {
+    command.value = template.command
+    // 初始化模板变量
+    templateVariables.value = {}
+    if (template.variables) {
+      for (const [varName, varInfo] of Object.entries(template.variables)) {
+        templateVariables.value[varName] = varInfo.default || ''
+      }
+      showVariables.value = Object.keys(template.variables).length > 0
+    } else {
+      showVariables.value = false
+    }
+  } else {
+    command.value = ''
+    templateVariables.value = {}
+    showVariables.value = false
+  }
+}
+
+// 重置模板选择
+const resetTemplateSelection = () => {
+  selectedTemplate.value = null
+  command.value = ''
+  templateVariables.value = {}
+  showVariables.value = false
+}
+
+// 添加命令到历史记录
+const addCommandToHistory = (cmd) => {
+  if (!cmd.trim()) return
+  
+  // 移除重复的命令
+  const existingIndex = commandHistory.value.indexOf(cmd)
+  if (existingIndex > -1) {
+    commandHistory.value.splice(existingIndex, 1)
+  }
+  
+  // 添加到历史记录开头
+  commandHistory.value.unshift(cmd)
+  
+  // 限制历史记录数量
+  if (commandHistory.value.length > maxHistoryItems) {
+    commandHistory.value.pop()
+  }
+  
+  // 保存到本地存储
+  localStorage.setItem('commandHistory', JSON.stringify(commandHistory.value))
+}
+
+// 从本地存储加载命令历史
+const loadCommandHistory = () => {
+  const savedHistory = localStorage.getItem('commandHistory')
+  if (savedHistory) {
+    commandHistory.value = JSON.parse(savedHistory)
+  }
+}
+
+// 处理命令输入框的键盘事件
+const handleCommandKeyDown = (event) => {
+  if (event.key === 'ArrowUp') {
+    event.preventDefault()
+    if (commandHistory.value.length > 0) {
+      if (historyIndex.value === -1) {
+        tempCommand.value = command.value
+        historyIndex.value = 0
+      } else if (historyIndex.value < commandHistory.value.length - 1) {
+        historyIndex.value++
+      }
+      command.value = commandHistory.value[historyIndex.value]
+    }
+  } else if (event.key === 'ArrowDown') {
+    event.preventDefault()
+    if (historyIndex.value > 0) {
+      historyIndex.value--
+      command.value = commandHistory.value[historyIndex.value]
+    } else if (historyIndex.value === 0) {
+      historyIndex.value = -1
+      command.value = tempCommand.value
+    }
+  } else if (event.key === 'Enter') {
+    historyIndex.value = -1
+  }
+}
+
+// 执行命令
+const executeCommand = async () => {
+  if (!command.value.trim()) {
+    ElMessage.warning('请输入要执行的命令')
+    return
+  }
+  
+  commandLoading.value = true
+  try {
+    // 准备命令执行参数
+    const commandParams = {
+      command: command.value,
+      variables: templateVariables.value,
+      template_id: selectedTemplate.value?.id || null
+    }
+    
+    if (currentCommandDeviceId.value) {
+      // 单个设备命令执行
+      const result = await deviceApi.executeCommand(currentCommandDeviceId.value, commandParams.command, commandParams.variables, commandParams.template_id)
+      
+      if (result.success) {
+        // 添加命令到历史记录
+        addCommandToHistory(command.value)
+        
+        commandResult.value = result.output
+        commandResultVisible.value = true
+        commandDialogVisible.value = false
+      } else {
+        ElMessage.error(result.message || '命令执行失败')
+      }
+    } else {
+      // 批量设备命令执行
+      const result = await deviceApi.batchExecuteCommand(selectedDevicesForCommand.value, commandParams.command, commandParams.variables, commandParams.template_id)
+      
+      // 添加命令到历史记录
+      addCommandToHistory(command.value)
+      
+      batchCommandResults.value = result.results
+      batchCommandResultVisible.value = true
+      commandDialogVisible.value = false
+      
+      ElMessage.success(`${result.success_count} 台设备命令执行成功，${result.failed_count} 台设备命令执行失败`)
+    }
+  } catch (error) {
+    ElMessage.error('命令执行失败：' + (error.message || '未知错误'))
+  } finally {
+    commandLoading.value = false
+  }
+}
+
 // 生命周期钩子
 onMounted(() => {
   fetchDevices()
+  loadCommandHistory()
 })
 </script>
 
@@ -337,6 +723,10 @@ onMounted(() => {
                     <el-icon><Delete /></el-icon>
                     删除选中
                   </el-dropdown-item>
+                  <el-dropdown-item @click="handleBatchExecuteCommand" divided>
+                    <el-icon><Plus /></el-icon>
+                    批量执行命令
+                  </el-dropdown-item>
                   <el-dropdown-item divided>批量更新状态</el-dropdown-item>
                   <el-dropdown-item @click="handleBatchUpdateStatus('active')">活跃</el-dropdown-item>
                   <el-dropdown-item @click="handleBatchUpdateStatus('maintenance')">维护</el-dropdown-item>
@@ -358,9 +748,14 @@ onMounted(() => {
       </template>
 
       <!-- 搜索表单 -->
-      <el-form :inline="true" :model="searchForm" class="search-form" @submit.prevent>
+      <el-form :inline="true" :model="deviceStore.searchForm" class="search-form" @submit.prevent>
         <el-form-item label="状态">
-          <el-select v-model="searchForm.status" placeholder="选择状态" clearable>
+          <el-select 
+            v-model="deviceStore.searchForm.status" 
+            placeholder="选择状态" 
+            clearable
+            @change="updateSearchForm('status', deviceStore.searchForm.status)"
+          >
             <el-option
               v-for="option in statusOptions"
               :key="option.value"
@@ -370,7 +765,12 @@ onMounted(() => {
           </el-select>
         </el-form-item>
         <el-form-item label="厂商">
-          <el-select v-model="searchForm.vendor" placeholder="选择厂商" clearable>
+          <el-select 
+            v-model="deviceStore.searchForm.vendor" 
+            placeholder="选择厂商" 
+            clearable
+            @change="updateSearchForm('vendor', deviceStore.searchForm.vendor)"
+          >
             <el-option
               v-for="option in vendorOptions"
               :key="option.value"
@@ -412,11 +812,12 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="350" fixed="right">
           <template #default="scope">
             <el-button size="small" @click="handleEditDevice(scope.row)">编辑</el-button>
             <el-button size="small" type="danger" @click="handleDeleteDevice(scope.row)">删除</el-button>
             <el-button size="small" type="warning" @click="handleTestConnectivity(scope.row)">连接性测试</el-button>
+            <el-button size="small" type="primary" @click="handleExecuteCommand(scope.row)">命令执行</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -424,8 +825,8 @@ onMounted(() => {
       <!-- 分页 -->
       <div class="pagination">
         <el-pagination
-          v-model:current-page="currentPage"
-          v-model:page-size="pageSize"
+          v-model:current-page="deviceStore.currentPage"
+          v-model:page-size="deviceStore.pageSize"
           :page-sizes="[10, 20, 50, 100]"
           layout="total, sizes, prev, pager, next, jumper"
           :total="deviceStore.deviceCount"
@@ -561,6 +962,277 @@ onMounted(() => {
         </span>
       </template>
     </el-dialog>
+
+    <!-- 命令执行对话框 -->
+    <el-dialog
+      v-model="commandDialogVisible"
+      :title="commandDialogTitle"
+      width="800px"
+    >
+      <el-tabs v-model="activeTab" @tab-change="handleTabChange">
+        <!-- 执行命令标签页 -->
+        <el-tab-pane label="执行命令" name="execute">
+          <el-form>
+            <!-- 命令模板选择 -->
+            <el-form-item label="命令模板">
+              <div class="template-select-container">
+                <el-select
+                  v-model="selectedTemplate"
+                  placeholder="选择命令模板（可选）"
+                  filterable
+                  :clearable="true"
+                  @change="handleTemplateChange"
+                  style="width: 100%"
+                >
+                  <el-option
+                    v-for="template in commandTemplates"
+                    :key="template.id"
+                    :label="template.name"
+                    :value="template"
+                  >
+                    <div class="template-option">
+                      <div class="template-name">{{ template.name }}</div>
+                      <div class="template-desc">{{ template.description || '无描述' }}</div>
+                      <div class="template-vendor" v-if="template.vendor">
+                        <el-tag size="small">{{ template.vendor }}</el-tag>
+                      </div>
+                    </div>
+                  </el-option>
+                </el-select>
+                <el-button type="text" @click="resetTemplateSelection" size="small">
+                  清除选择
+                </el-button>
+              </div>
+            </el-form-item>
+
+            <!-- 模板变量输入区域 -->
+            <el-form-item label="模板变量" v-if="showVariables">
+              <el-collapse v-model="activeCollapseNames">
+                <el-collapse-item title="配置模板变量" name="variables">
+                  <el-form :model="templateVariables" label-width="120px">
+                    <el-form-item
+                      v-for="(value, key) in selectedTemplate.variables"
+                      :key="key"
+                      :label="key"
+                    >
+                      <el-input
+                        v-model="templateVariables[key]"
+                        :placeholder="value.description || `请输入${key}`"
+                        :type="value.type === 'password' ? 'password' : 'text'"
+                        show-password
+                      />
+                    </el-form-item>
+                  </el-form>
+                </el-collapse-item>
+              </el-collapse>
+            </el-form-item>
+
+            <!-- 命令输入区域 -->
+            <el-form-item label="命令">
+              <div class="command-input-container">
+                <el-input
+                  v-model="command"
+                  type="textarea"
+                  :rows="10"
+                  placeholder="请输入要执行的命令（支持上下箭头浏览历史命令）"
+                  @keydown="handleCommandKeyDown"
+                  class="command-textarea"
+                />
+                <!-- 命令历史下拉列表 -->
+                <el-dropdown
+                  v-if="commandHistory.length > 0"
+                  placement="bottom-start"
+                  @visible-change="showCommandHistory = $event"
+                >
+                  <el-button type="text" class="history-button">
+                    历史命令 <el-icon class="el-icon--right"><ArrowDown /></el-icon>
+                  </el-button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item
+                        v-for="(cmd, index) in commandHistory"
+                        :key="index"
+                        @click="command = cmd"
+                        class="history-item"
+                      >
+                        <pre>{{ cmd }}</pre>
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
+            </el-form-item>
+          </el-form>
+        </el-tab-pane>
+        
+        <!-- 模板管理标签页 -->
+        <el-tab-pane label="模板管理" name="templates">
+          <!-- 模板管理功能 -->
+          <div class="template-management">
+            <div class="template-header">
+              <el-input
+                v-model="templateSearchKeyword"
+                placeholder="搜索模板"
+                clearable
+                style="width: 200px; margin-right: 10px"
+                @input="handleTemplateSearch"
+              >
+                <template #append>
+                  <el-icon><Search /></el-icon>
+                </template>
+              </el-input>
+              <el-button type="primary" @click="handleCreateTemplate">
+                <el-icon><Plus /></el-icon>
+                新建模板
+              </el-button>
+            </div>
+            
+            <!-- 模板列表 -->
+            <el-table
+              :data="filteredTemplates"
+              style="width: 100%"
+              border
+              v-loading="templateLoading"
+            >
+              <el-table-column prop="name" label="模板名称" min-width="150" />
+              <el-table-column prop="command" label="命令内容" min-width="200" show-overflow-tooltip />
+              <el-table-column prop="vendor" label="厂商" width="100" />
+              <el-table-column prop="description" label="描述" min-width="150" show-overflow-tooltip />
+              <el-table-column prop="created_at" label="创建时间" width="180" />
+              <el-table-column label="操作" width="150" fixed="right">
+                <template #default="scope">
+                  <el-button size="small" @click="handleEditTemplate(scope.row)">编辑</el-button>
+                  <el-button size="small" type="danger" @click="handleDeleteTemplate(scope.row)">删除</el-button>
+                </template>
+              </el-table-column>
+            </el-table>
+            
+            <!-- 模板编辑对话框 -->
+            <el-dialog
+              v-model="templateFormVisible"
+              :title="templateFormTitle"
+              width="600px"
+            >
+              <el-form :model="templateForm" :rules="templateFormRules" ref="templateFormRef" label-width="120px">
+                <el-form-item label="模板名称" prop="name">
+                  <el-input v-model="templateForm.name" placeholder="请输入模板名称" />
+                </el-form-item>
+                <el-form-item label="命令内容" prop="command">
+                  <el-input
+                    v-model="templateForm.command"
+                    type="textarea"
+                    :rows="5"
+                    placeholder="请输入命令内容，支持变量定义如{{variable}}"
+                  />
+                </el-form-item>
+                <el-form-item label="厂商">
+                  <el-select v-model="templateForm.vendor" placeholder="选择厂商" clearable>
+                    <el-option
+                      v-for="option in vendorOptions"
+                      :key="option.value"
+                      :label="option.label"
+                      :value="option.value"
+                    />
+                  </el-select>
+                </el-form-item>
+                <el-form-item label="描述">
+                  <el-input
+                    v-model="templateForm.description"
+                    type="textarea"
+                    :rows="3"
+                    placeholder="请输入模板描述"
+                  />
+                </el-form-item>
+                <el-form-item label="变量定义">
+                  <el-input
+                    v-model="templateForm.variablesStr"
+                    type="textarea"
+                    :rows="4"
+                    placeholder='请输入变量定义，JSON格式如：{"variable": {"type": "string", "description": "描述"}}'
+                  />
+                  <div class="el-form-item__help">变量定义为JSON格式，支持type（string/password）和description字段</div>
+                </el-form-item>
+              </el-form>
+              <template #footer>
+                <span class="dialog-footer">
+                  <el-button @click="templateFormVisible = false">取消</el-button>
+                  <el-button type="primary" @click="handleSubmitTemplateForm" :loading="templateFormLoading">确定</el-button>
+                </span>
+              </template>
+            </el-dialog>
+          </div>
+        </el-tab-pane>
+      </el-tabs>
+      
+      <!-- 只在执行命令标签页显示执行按钮 -->
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="commandDialogVisible = false">取消</el-button>
+          <el-button 
+            type="primary" 
+            @click="executeCommand" 
+            :loading="commandLoading"
+            v-if="activeTab === 'execute'"
+          >
+            执行命令
+          </el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 命令执行结果对话框 -->
+    <el-dialog
+      v-model="commandResultVisible"
+      title="命令执行结果"
+      width="900px"
+    >
+      <el-scrollbar height="600px">
+        <pre class="command-result" v-highlight><code>{{ commandResult }}</code></pre>
+      </el-scrollbar>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="commandResultVisible = false">关闭</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 批量命令执行结果对话框 -->
+    <el-dialog
+      v-model="batchCommandResultVisible"
+      title="批量命令执行结果"
+      width="900px"
+    >
+      <el-table
+        :data="batchCommandResults"
+        style="width: 100%"
+        border
+      >
+        <el-table-column prop="hostname" label="设备名称" width="200" />
+        <el-table-column prop="success" label="执行结果" width="100">
+          <template #default="scope">
+            <el-tag :type="scope.row.success ? 'success' : 'danger'">
+              {{ scope.row.success ? '成功' : '失败' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="message" label="消息" width="200" />
+        <el-table-column prop="output" label="输出结果" min-width="400">
+          <template #default="scope">
+            <div v-if="scope.row.output" class="output-preview" @click="scope.row.showFullOutput = !scope.row.showFullOutput">
+              <el-scrollbar :height="scope.row.showFullOutput ? '400px' : '100px'">
+                <pre v-highlight><code>{{ scope.row.output }}</code></pre>
+              </el-scrollbar>
+              <div class="show-more">{{ scope.row.showFullOutput ? '收起' : '展开' }}</div>
+            </div>
+          </template>
+        </el-table-column>
+      </el-table>
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="batchCommandResultVisible = false">关闭</el-button>
+        </span>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -595,5 +1267,125 @@ onMounted(() => {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+/* 命令执行结果样式 */
+.command-result {
+  white-space: pre-wrap;
+  font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #333;
+  background-color: #f5f5f5;
+  padding: 15px;
+  border-radius: 4px;
+  margin: 0;
+}
+
+/* 批量命令执行结果样式 */
+.output-preview {
+  cursor: pointer;
+}
+
+.output-preview pre {
+  margin: 0;
+  padding: 10px;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+  font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+  line-height: 1.4;
+  white-space: pre-wrap;
+}
+
+.show-more {
+  text-align: center;
+  color: #409eff;
+  font-size: 12px;
+  margin-top: 5px;
+  cursor: pointer;
+}
+
+.show-more:hover {
+  text-decoration: underline;
+}
+
+/* 命令模板选择样式 */
+.template-select-container {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.template-option {
+  padding: 5px 0;
+}
+
+.template-name {
+  font-weight: bold;
+  margin-bottom: 3px;
+}
+
+.template-desc {
+  font-size: 12px;
+  color: #666;
+  margin-bottom: 3px;
+}
+
+.template-vendor {
+  margin-top: 5px;
+}
+
+.template-vendor .el-tag {
+  margin-right: 5px;
+}
+
+/* 命令输入容器样式 */
+.command-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 折叠面板样式 */
+.el-collapse-item__header {
+  font-weight: bold;
+}
+
+.el-collapse-item__content {
+  padding: 15px;
+}
+
+/* 历史命令样式 */
+.history-item pre {
+  white-space: pre-wrap;
+  font-family: Consolas, Monaco, 'Andale Mono', 'Ubuntu Mono', monospace;
+  font-size: 13px;
+  margin: 0;
+  padding: 5px;
+  background-color: #f5f5f5;
+  border-radius: 3px;
+}
+
+/* 模板管理样式 */
+.template-management {
+  padding: 10px 0;
+}
+
+.template-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.template-table {
+  margin-top: 15px;
+}
+
+.el-form-item__help {
+  margin-top: 5px;
+  color: #909399;
+  font-size: 12px;
 }
 </style>
