@@ -499,6 +499,99 @@ class ErrorResponse(BaseModel):
     details: Optional[Dict[str, Any]] = Field(None, description="错误详情")
 
 
+# 命令模板相关模型
+class CommandTemplateBase(BaseModel):
+    """命令模板基础模型"""
+    name: str = Field(..., description="模板名称")
+    description: Optional[str] = Field(None, description="模板描述")
+    command: str = Field(..., description="命令内容")
+    vendor: Optional[str] = Field(None, description="适用厂商")
+    device_type: Optional[str] = Field(None, description="适用设备类型")
+    variables: Optional[Dict[str, Any]] = Field(None, description="模板变量定义")
+    tags: Optional[List[str]] = Field(None, description="标签列表")
+    is_public: bool = Field(True, description="是否公开")
+    created_by: Optional[str] = Field(None, description="创建者")
+
+
+class CommandTemplateCreate(CommandTemplateBase):
+    """创建命令模板模型"""
+    pass
+
+
+class CommandTemplateUpdate(BaseModel):
+    """更新命令模板模型"""
+    name: Optional[str] = Field(None, description="模板名称")
+    description: Optional[str] = Field(None, description="模板描述")
+    command: Optional[str] = Field(None, description="命令内容")
+    vendor: Optional[str] = Field(None, description="适用厂商")
+    device_type: Optional[str] = Field(None, description="适用设备类型")
+    variables: Optional[Dict[str, Any]] = Field(None, description="模板变量定义")
+    tags: Optional[List[str]] = Field(None, description="标签列表")
+    is_public: Optional[bool] = Field(None, description="是否公开")
+
+
+class CommandTemplate(CommandTemplateBase):
+    """命令模板模型"""
+    id: int = Field(..., description="模板ID")
+    created_at: Optional[datetime] = Field(None, description="创建时间")
+    updated_at: Optional[datetime] = Field(None, description="更新时间")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# 命令历史相关模型
+class CommandHistoryBase(BaseModel):
+    """命令历史基础模型"""
+    device_id: int = Field(..., description="设备ID")
+    command: str = Field(..., description="执行的命令")
+    output: Optional[str] = Field(None, description="命令输出")
+    success: bool = Field(..., description="执行是否成功")
+    error_message: Optional[str] = Field(None, description="错误信息")
+    executed_by: Optional[str] = Field(None, description="执行用户")
+    duration: Optional[float] = Field(None, description="执行时长（秒）")
+
+
+class CommandHistoryCreate(CommandHistoryBase):
+    """创建命令历史模型"""
+    pass
+
+
+class CommandHistory(CommandHistoryBase):
+    """命令历史模型"""
+    id: int = Field(..., description="历史记录ID")
+    execution_time: Optional[datetime] = Field(None, description="执行时间")
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# 命令执行相关模型
+class CommandExecutionRequest(BaseModel):
+    """命令执行请求模型"""
+    command: str = Field(..., description="要执行的命令")
+    variables: Optional[Dict[str, Any]] = Field(None, description="命令变量")
+    template_id: Optional[int] = Field(None, description="使用的模板ID")
+
+
+class BatchCommandExecutionRequest(BaseModel):
+    """批量命令执行请求模型"""
+    device_ids: List[int] = Field(..., description="设备ID列表")
+    command: str = Field(..., description="要执行的命令")
+    variables: Optional[Dict[str, Any]] = Field(None, description="命令变量")
+    template_id: Optional[int] = Field(None, description="使用的模板ID")
+
+
+class CommandExecutionResult(BaseModel):
+    """命令执行结果模型"""
+    device_id: int = Field(..., description="设备ID")
+    device_name: Optional[str] = Field(None, description="设备名称")
+    ip_address: Optional[str] = Field(None, description="设备IP地址")
+    command: str = Field(..., description="执行的命令")
+    output: Optional[str] = Field(None, description="命令输出")
+    success: bool = Field(..., description="执行是否成功")
+    error_message: Optional[str] = Field(None, description="错误信息")
+    duration: Optional[float] = Field(None, description="执行时长（秒）")
+
+
 # 设备详情模型（放在文件末尾，确保引用的类型已定义）
 class DeviceWithDetails(Device):
     """设备详情模型（包含关联数据）"""
@@ -508,3 +601,4 @@ class DeviceWithDetails(Device):
     configurations: Optional[List[Configuration]] = Field(default_factory=list, description="配置记录列表")
     mac_addresses: Optional[List[MACAddress]] = Field(default_factory=list, description="MAC地址列表")
     versions: Optional[List[DeviceVersion]] = Field(default_factory=list, description="版本信息列表")
+    command_history: Optional[List[CommandHistory]] = Field(default_factory=list, description="命令执行历史")

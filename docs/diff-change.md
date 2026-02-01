@@ -42,3 +42,21 @@
 - 添加了加载状态管理，在表单提交过程中显示加载状态
 - 为API错误添加了用户友好的错误提示
 **变更原因**：修复命令模板创建时的错误处理问题，提高用户体验
+
+### 2026-01-27 12:20:00
+
+**变更文件**：frontend/src/views/DeviceManagement.vue
+**变更位置**：509-519
+**变更内容**：
+- 修改了loadCommandTemplates函数，将数据解析逻辑从result.templates改为result.data.items
+**变更原因**：修复数据结构不匹配问题，正确解析后端返回的数据格式
+
+### 2026-01-27 12:20:00
+
+**变更文件**：app/api/endpoints/command_templates.py
+**变更位置**：9-231
+**变更内容**：
+- 为数据库模型添加了别名CommandTemplateModel以避免命名冲突
+- 在get_command_templates函数中添加了数据库模型到Pydantic模型的转换
+- 更新了所有函数中的CommandTemplate引用为CommandTemplateModel
+**变更原因**：修复后端序列化错误，确保所有API返回正确的Pydantic模型格式

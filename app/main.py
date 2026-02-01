@@ -35,8 +35,12 @@ async def startup_event():
     应用启动事件
     """
     # 加载备份任务
-    db = next(get_db())
-    backup_scheduler.load_schedules(db)
+    try:
+        db = next(get_db())
+        backup_scheduler.load_schedules(db)
+    except Exception as e:
+        print(f"Warning: Could not load backup schedules from database: {e}")
+        print("Application will continue without backup scheduler functionality.")
 
 
 @app.get("/")

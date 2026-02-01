@@ -3,7 +3,7 @@ API路由主文件
 """
 from fastapi import APIRouter
 
-from app.api.endpoints import devices, ports, vlans, inspections, configurations, device_collection, git_configs
+from app.api.endpoints import devices, ports, vlans, inspections, configurations, device_collection, git_configs, command_templates, command_history
 
 # 创建API路由器
 api_router = APIRouter()
@@ -16,3 +16,5 @@ api_router.include_router(inspections.router, prefix="/inspections", tags=["insp
 api_router.include_router(configurations.router, prefix="/configurations", tags=["configurations"])
 api_router.include_router(device_collection.router, prefix="/device-collection", tags=["device-collection"])
 api_router.include_router(git_configs.router, prefix="/git-configs", tags=["git-configs"])
+api_router.include_router(command_templates.router, prefix="/command-templates", tags=["command-templates"])
+api_router.include_router(command_history.router, prefix="/command-history", tags=["command-history"])

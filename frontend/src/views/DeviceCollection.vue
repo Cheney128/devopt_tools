@@ -246,7 +246,7 @@ const loadDevices = async () => {
     loading.value.devices = true
     // 调用设备列表API获取真实设备数据
     const response = await deviceApi.getDevices()
-    devices.value = response || []
+    devices.value = response.devices || []
   } catch (error) {
     ElMessage.error('加载设备列表失败')
     console.error('加载设备列表失败:', error)

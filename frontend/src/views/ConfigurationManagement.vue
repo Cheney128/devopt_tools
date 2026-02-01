@@ -280,7 +280,7 @@ export default {
     const loadDevices = async () => {
       try {
         const response = await deviceApi.getDevices()
-        deviceList.value = response || []
+        deviceList.value = response.devices || []
       } catch (error) {
         ElMessage.error('获取设备列表失败')
       }

@@ -104,7 +104,93 @@ def create_git_configs_table():
         connection.close()
 
 
+def create_command_templates_table():
+    """
+    创建command_templates表
+    """
+    print("\n正在创建 command_templates 表...")
+    
+    connection = engine.connect()
+    try:
+        # 检查 command_templates 表是否存在
+        result = connection.execute(text("SHOW TABLES LIKE 'command_templates'"))
+        if not result.fetchone():
+            print("创建 command_templates 表...")
+            connection.execute(text("""
+                CREATE TABLE command_templates (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(100) NOT NULL UNIQUE,
+                    description TEXT NULL,
+                    command TEXT NOT NULL,
+                    vendor VARCHAR(50) NULL,
+                    device_type VARCHAR(50) NULL,
+                    variables JSON NULL,
+                    tags JSON NULL,
+                    is_public BOOLEAN NOT NULL DEFAULT TRUE,
+                    created_by VARCHAR(100) NULL,
+                    created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                    INDEX idx_name (name),
+                    INDEX idx_vendor (vendor),
+                    INDEX idx_device_type (device_type)
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+            """))
+            print("  ✓ command_templates 表已创建")
+        else:
+            print("  ✓ command_templates 表已存在")
+        
+        # 提交事务
+        connection.commit()
+        print("\ncommand_templates 表创建完成!")
+        
+    finally:
+        connection.close()
+
+
+def create_command_history_table():
+    """
+    创建command_history表
+    """
+    print("\n正在创建 command_history 表...")
+    
+    connection = engine.connect()
+    try:
+        # 检查 command_history 表是否存在
+        result = connection.execute(text("SHOW TABLES LIKE 'command_history'"))
+        if not result.fetchone():
+            print("创建 command_history 表...")
+            connection.execute(text("""
+                CREATE TABLE command_history (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    device_id INT NOT NULL,
+                    command TEXT NOT NULL,
+                    output TEXT NULL,
+                    success BOOLEAN NOT NULL,
+                    error_message TEXT NULL,
+                    executed_by VARCHAR(100) NULL,
+                    execution_time DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    duration FLOAT NULL,
+                    INDEX idx_device_id (device_id),
+                    INDEX idx_execution_time (execution_time),
+                    INDEX idx_success (success),
+                    FOREIGN KEY (device_id) REFERENCES devices(id) ON DELETE CASCADE
+                ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_general_ci
+            """))
+            print("  ✓ command_history 表已创建")
+        else:
+            print("  ✓ command_history 表已存在")
+        
+        # 提交事务
+        connection.commit()
+        print("\ncommand_history 表创建完成!")
+        
+    finally:
+        connection.close()
+
+
 if __name__ == "__main__":
     update_configurations_table()
     create_git_configs_table()
+    create_command_templates_table()
+    create_command_history_table()
     print("\n所有数据库更新操作已完成!")

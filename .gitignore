@@ -5,6 +5,9 @@ nul
 venv/
 .venv/
 
+# Trae IDE
+.trae/
+
 # IDE directories and files
 .vscode/
 .idea/

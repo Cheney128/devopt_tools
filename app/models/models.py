@@ -195,3 +195,47 @@ class DeviceVersion(Base):
     
     # 关联关系
     device = relationship("Device", back_populates="device_versions")
+
+
+class CommandTemplate(Base):
+    """
+    命令模板表
+    """
+    __tablename__ = "command_templates"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    name = Column(String(100), nullable=False, unique=True, index=True)
+    description = Column(Text, nullable=True)
+    command = Column(Text, nullable=False)
+    vendor = Column(String(50), nullable=True, index=True)  # 适用厂商
+    device_type = Column(String(50), nullable=True, index=True)  # 适用设备类型
+    variables = Column(JSON, nullable=True)  # 模板变量定义
+    tags = Column(JSON, nullable=True)  # 标签列表
+    is_public = Column(Boolean, nullable=False, default=True)  # 是否公开
+    created_by = Column(String(100), nullable=True)  # 创建者
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+
+class CommandHistory(Base):
+    """
+    命令执行历史表
+    """
+    __tablename__ = "command_history"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    device_id = Column(Integer, ForeignKey("devices.id"), nullable=False)
+    command = Column(Text, nullable=False)
+    output = Column(Text, nullable=True)
+    success = Column(Boolean, nullable=False)
+    error_message = Column(Text, nullable=True)
+    executed_by = Column(String(100), nullable=True)  # 执行用户
+    execution_time = Column(DateTime, nullable=False, default=func.now())
+    duration = Column(Float, nullable=True)  # 执行时长（秒）
+    
+    # 关联关系
+    device = relationship("Device", back_populates="command_history")
+
+
+# 为Device类添加command_history关联
+Device.command_history = relationship("CommandHistory", back_populates="device", cascade="all, delete-orphan")
