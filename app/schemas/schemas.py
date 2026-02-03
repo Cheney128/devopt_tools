@@ -459,20 +459,6 @@ class DeviceCollectionResult(BaseModel):
     data: Optional[Any] = Field(None, description="采集数据")
 
 
-# Oxidized集成相关模型
-class OxidizedStatus(BaseModel):
-    """Oxidized状态模型"""
-    status: str = Field(..., description="Oxidized服务状态")
-    message: str = Field(..., description="状态消息")
-
-
-class OxidizedSyncResult(BaseModel):
-    """Oxidized同步结果模型"""
-    success: bool = Field(..., description="同步是否成功")
-    message: str = Field(..., description="同步结果消息")
-    synced_count: int = Field(..., description="同步的设备数量")
-
-
 # 通用响应模型
 class InspectionResult(BaseModel):
     """巡检结果模型"""

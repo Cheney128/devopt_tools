@@ -13,10 +13,8 @@ services:
       - .:/app
     environment:
       - DATABASE_URL=mysql://admin:password@db:3306/switch_manage
-      - OXIDIZED_URL=http://oxidized:8888
     depends_on:
       - db
-      - oxidized
     networks:
       - switch_manage_network
 
@@ -49,25 +47,8 @@ services:
     networks:
       - switch_manage_network
 
-  # Oxidized服务
-  oxidized:
-    image: oxidized/oxidized:latest
-    container_name: switch_manage_oxidized
-    ports:
-      - "8888:8888"
-    volumes:
-      - oxidized_config:/root/.config/oxidized
-      - oxidized_data:/root/.config/oxidized/data
-    environment:
-      - OXIDIZED_REPO_URI=/root/.config/oxidized/data
-      - OXIDIZED_REPO_SSH_KEY=/root/.config/oxidized/id_rsa
-    networks:
-      - switch_manage_network
-
 volumes:
   mysql_data:
-  oxidized_config:
-  oxidized_data:
 
 networks:
   switch_manage_network:

@@ -60,3 +60,132 @@
 - 在get_command_templates函数中添加了数据库模型到Pydantic模型的转换
 - 更新了所有函数中的CommandTemplate引用为CommandTemplateModel
 **变更原因**：修复后端序列化错误，确保所有API返回正确的Pydantic模型格式
+
+### 2026-02-03 15:00:00
+
+**变更文件**：docker-compose.yml
+**变更位置**：14-70
+**变更内容**：
+- 移除了OXIDIZED_URL环境变量
+- 移除了oxidized服务依赖
+- 删除了整个oxidized服务定义（包含镜像、端口、卷、环境变量等配置）
+- 移除了oxidized_config和oxidized_data数据卷定义
+**变更原因**：将oxidized从系统中解耦，网络设备备份由本系统结合Git完成，实现网络设备备份+版本管理功能
+
+### 2026-02-03 15:00:00
+
+**变更文件**：README.md
+**变更位置**：39-470
+**变更内容**：
+- 移除了"5. 与Oxidized集成"功能模块描述
+- 从基础设施表格中移除了Oxidized条目
+- 更新了系统架构图，移除了Oxidized相关组件
+- 更新了数据流图，移除了Oxidized平台相关流程
+- 从项目结构中移除了oxidized_service.py
+- 更新了部署架构图，移除了Oxidized服务
+- 更新了服务依赖关系图
+- 从环境配置示例中移除了OXIDIZED_URL
+**变更原因**：配合oxidized解耦，更新项目文档以反映新的系统架构
+
+### 2026-02-03 15:00:00
+
+**变更文件**：app/config.py
+**变更位置**：24-26
+**变更内容**：
+- 移除了OXIDIZED_URL配置项及其默认值
+**变更原因**：移除oxidized相关配置，系统不再依赖oxidized服务
+
+### 2026-02-03 15:00:00
+
+**变更文件**：app/services/__init__.py
+**变更位置**：2-13
+**变更内容**：
+- 移除了oxidized_service的导入语句
+- 从__all__列表中移除了OxidizedService和get_oxidized_service
+**变更原因**：移除oxidized服务模块的导出
+
+### 2026-02-03 15:00:00
+
+**变更文件**：app/services/oxidized_service.py
+**变更位置**：1-128
+**变更内容**：
+- 删除了整个oxidized_service.py文件
+**变更原因**：oxidized服务已不再需要，系统直接使用Git进行配置版本管理
+
+### 2026-02-03 15:00:00
+
+**变更文件**：app/api/endpoints/configurations.py
+**变更位置**：16-274
+**变更内容**：
+- 移除了oxidized_service的导入
+- 删除了/get/oxidized/status端点
+- 删除了/post/oxidized/sync端点
+- 删除了/get/oxidized/{device_id}端点
+**变更原因**：移除所有与oxidized相关的API接口
+
+### 2026-02-03 15:00:00
+
+**变更文件**：app/schemas/schemas.py
+**变更位置**：462-474
+**变更内容**：
+- 删除了OxidizedStatus模型
+- 删除了OxidizedSyncResult模型
+**变更原因**：移除oxidized相关的数据模型
+
+### 2026-02-03 15:00:00
+
+**变更文件**：tests/unit/test_configurations.py
+**变更位置**：1-86
+**变更内容**：
+- 移除了oxidized_service的导入
+- 删除了test_get_oxidized_status测试函数
+- 删除了test_sync_with_oxidized测试函数
+- 删除了test_get_config_from_oxidized测试函数
+**变更原因**：移除与oxidized相关的单元测试
+
+### 2026-02-03 15:00:00
+
+**变更文件**：docs/project_analysis.md
+**变更位置**：13-495
+**变更内容**：
+- 将"与现有系统（如Oxidized）集成"改为"通过Git实现配置版本管理"
+- 从技术栈表格中将Oxidized替换为Git
+- 更新配置管理模块描述，将"与Oxidized集成获取配置备份"改为"Git集成实现配置版本控制"
+- 从架构图中移除了Oxidized平台
+- 从配置备份流程图中移除了Oxidized平台
+- 更新项目优势描述
+**变更原因**：更新项目分析文档，反映系统不再依赖oxidized的新架构
+
+### 2026-02-03 15:00:00
+
+**变更文件**：docs/项目分析/06-部署架构分析.md
+**变更位置**：38-462
+**变更内容**：
+- 从整体架构图中移除了Oxidized服务
+- 从服务依赖关系图中移除了Oxidized
+- 从Backend服务配置中移除了OXIDIZED_URL环境变量和oxidized依赖
+- 删除了整个2.1.4 Oxidized服务章节
+- 从网络和卷配置中移除了oxidized_config和oxidized_data
+- 从环境变量示例中移除了OXIDIZED_URL
+- 从配置加载机制中移除了OXIDIZED_URL
+- 从备份策略中移除了Oxidized配置和数据备份
+- 将微服务架构从4个服务改为3个服务
+**变更原因**：更新部署架构文档，反映移除oxidized后的新部署架构
+
+### 2026-02-03 15:00:00
+
+**变更文件**：docs/项目分析/01-项目架构分析.md
+**变更位置**：58-126
+**变更内容**：
+- 从整体架构图中移除了Oxidized组件
+- 从集成层描述中移除了"配置备份：Oxidized (可选)"
+- 从后端模块结构中移除了oxidized_service.py
+**变更原因**：更新项目架构文档，反映移除oxidized后的新架构
+
+### 2026-02-03 15:00:00
+
+**变更文件**：docs/项目分析/02-技术栈分析.md
+**变更位置**：28-32
+**变更内容**：
+- 从技术栈总览图中将Oxidized替换为Git
+**变更原因**：更新技术栈分析文档，反映使用Git替代Oxidized进行配置版本管理

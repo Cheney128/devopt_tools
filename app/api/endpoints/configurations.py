@@ -13,7 +13,6 @@ from app.schemas.schemas import (Configuration as ConfigurationSchema,
                                  BackupSchedule as BackupScheduleSchema,
                                  BackupScheduleCreate,
                                  BackupScheduleUpdate)
-from app.services.oxidized_service import get_oxidized_service, OxidizedService
 from app.services.netmiko_service import get_netmiko_service, NetmikoService
 from app.services.git_service import get_git_service, GitService
 from app.services.backup_scheduler import get_backup_scheduler, BackupSchedulerService
@@ -217,61 +216,6 @@ def batch_delete_configurations(config_ids: List[int], db: Session = Depends(get
         "failed_count": failed_count,
         "failed_configs": failed_configs if failed_configs else None
     }
-
-
-@router.get("/oxidized/status", response_model=Dict[str, Any])
-async def get_oxidized_status(
-    oxidized_service: OxidizedService = Depends(get_oxidized_service)
-):
-    """
-    获取Oxidized服务状态
-    """
-    return await oxidized_service.get_oxidized_status()
-
-
-@router.post("/oxidized/sync", response_model=Dict[str, Any])
-async def sync_with_oxidized(
-    db: Session = Depends(get_db),
-    oxidized_service: OxidizedService = Depends(get_oxidized_service)
-):
-    """
-    与Oxidized同步设备信息
-    """
-    return await oxidized_service.sync_with_oxidized(db)
-
-
-@router.get("/oxidized/{device_id}", response_model=Dict[str, Any])
-async def get_config_from_oxidized(
-    device_id: int,
-    db: Session = Depends(get_db),
-    oxidized_service: OxidizedService = Depends(get_oxidized_service)
-):
-    """
-    从Oxidized获取设备配置
-    """
-    config_content = await oxidized_service.get_device_config(device_id, db)
-    if not config_content:
-        return {"success": False, "message": "Failed to get config from Oxidized"}
-    
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if device:
-        new_config = Configuration(
-            device_id=device_id,
-            config_content=config_content,
-            version="1.0",
-            change_description="Fetched from Oxidized"
-        )
-        db.add(new_config)
-        db.commit()
-        db.refresh(new_config)
-        return {
-            "success": True,
-            "message": "Config fetched from Oxidized and saved",
-            "config_id": new_config.id,
-            "version": new_config.version
-        }
-    
-    return {"success": False, "message": "Device not found"}
 
 
 @router.post("/device/{device_id}/collect", response_model=Dict[str, Any])

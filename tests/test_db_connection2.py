@@ -4,22 +4,20 @@
 import pymysql
 import socket
 from app.config import settings
+from sqlalchemy.engine import make_url
 
 print(f"Testing database connection with: {settings.DATABASE_URL}")
 print(f"Current machine hostname: {socket.gethostname()}")
 print(f"Current machine IP: {socket.gethostbyname(socket.gethostname())}")
 
 # 解析数据库连接字符串
-import re
-
-url = settings.DATABASE_URL
-match = re.match(r'mysql://(.*?):(.*?)@(.*?):(.*?)/(.*?)', url)
-if match:
-    user = match.group(1)
-    password = match.group(2).replace('%40', '@')
-    host = match.group(3)
-    port = int(match.group(4))
-    database = match.group(5)
+url = make_url(settings.DATABASE_URL)
+if url:
+    user = url.username
+    password = url.password
+    host = url.host
+    port = url.port
+    database = url.database
     
     print(f"\nParsed connection details:")
     print(f"User: {user}")
@@ -56,7 +54,7 @@ if match:
             users = cursor.fetchall()
             print("\nRoot user permissions:")
             for u in users:
-                print(f"User: {u['user']}, Host: {u['host']}")
+                print(f"User: {u.get('user', u.get('USER'))}, Host: {u.get('host', u.get('HOST'))}")
         
         conn.close()
         print("\n✅ Connection closed successfully!")

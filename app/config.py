@@ -21,9 +21,6 @@ class Settings:
         # 数据库配置
         self.DATABASE_URL = os.getenv('DATABASE_URL')
 
-        # Oxidized配置
-        self.OXIDIZED_URL = os.getenv('OXIDIZED_URL', 'http://localhost:8888')
-
         # API配置
         self.API_V1_STR = os.getenv('API_V1_STR', '/api/v1')
         self.PROJECT_NAME = os.getenv('PROJECT_NAME', 'Switch Manage System')

@@ -10,7 +10,7 @@
 - 提高网络运维效率
 - 实现批量操作，减少重复劳动
 - 实时监控设备状态，及时发现问题
-- 与现有系统（如Oxidized）集成，实现数据共享
+- 通过Git实现配置版本管理
 
 ## 2. 技术栈分析
 
@@ -38,7 +38,7 @@
 | 技术 | 版本 | 用途 | 优势 |
 |------|------|------|------|
 | MySQL | 5.7+ | 数据库 | 稳定可靠、广泛使用、支持事务 |
-| Oxidized | 0.28+ | 配置备份 | 自动备份设备配置、版本管理 |
+| Git | - | 配置版本管理 | 分布式版本控制、分支管理、历史追溯 |
 | Docker | - | 容器化部署 | 简化部署、环境一致性、易于扩展 |
 
 ## 3. 项目结构分析
@@ -157,7 +157,7 @@ graph TD
 - **主要操作**：
   - 查看设备配置
   - 配置版本管理
-  - 与Oxidized集成获取配置备份
+  - Git集成实现配置版本控制
 - **API路径**：`/api/v1/configurations`
 - **相关文件**：
   - 后端：`app/api/endpoints/configurations.py`
@@ -341,16 +341,13 @@ flowchart TD
     end
 
     subgraph 集成层
-        O[Oxidized平台] --> P[配置备份服务]
         Q[Git仓库] --> R[版本管理服务]
     end
 
     C --> E
     J --> S[交换机设备]
     H --> K
-    I --> O
     I --> Q
-    P --> K
 ```
 
 ### 7.2 核心业务流程
@@ -388,7 +385,6 @@ sequenceDiagram
     participant Frontend as 前端界面
     participant Backend as 后端API
     participant Service as 业务逻辑
-    participant Oxidized as Oxidized平台
     participant DB as 数据库
     participant Git as Git仓库
 
@@ -492,7 +488,7 @@ npm run test
 1. **技术栈先进**：使用FastAPI、Vue 3等现代化技术
 2. **模块化设计**：代码结构清晰，易于维护和扩展
 3. **功能全面**：涵盖设备管理、巡检、配置管理等核心功能
-4. **良好的扩展性**：支持与Oxidized、Git等系统集成
+4. **良好的扩展性**：支持Git集成实现配置版本管理
 5. **自动化程度高**：支持批量操作和定时任务
 
 ### 11.2 改进建议
