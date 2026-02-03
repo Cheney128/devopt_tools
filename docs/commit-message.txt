@@ -1,0 +1,14 @@
+refactor: Remove Oxidized dependency, use Git for config version management
+
+- Remove oxidized service from docker-compose.yml
+- Delete app/services/oxidized_service.py
+- Remove OXIDIZED_URL from app/config.py
+- Remove oxidized_service import from app/services/__init__.py
+- Remove oxidized related API endpoints from configurations.py
+- Remove oxidized models from schemas.py
+- Update tests/unit/test_configurations.py
+- Update README.md and documentation files
+- Update docs/diff-change.md with change records
+
+The system now uses Git directly for network device configuration
+version management, no longer depends on external Oxidized service.
