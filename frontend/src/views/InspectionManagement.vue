@@ -1,7 +1,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { PlayCircle, DataAnalysis } from '@element-plus/icons-vue'
+import { VideoPlay, DataAnalysis } from '@element-plus/icons-vue'
 
 // 响应式数据
 const loading = ref(false)
@@ -118,7 +118,7 @@ onMounted(() => {
           <span>巡检管理</span>
           <div class="header-buttons">
             <el-button type="primary" @click="runBatchInspection" :loading="inspecting">
-              <el-icon><PlayCircle /></el-icon>
+              <el-icon><VideoPlay /></el-icon>
               批量巡检
             </el-button>
           </div>
@@ -192,7 +192,7 @@ onMounted(() => {
               @click="runInspection(scope.row.device_id)"
               :loading="inspecting"
             >
-              <el-icon><PlayCircle /></el-icon>
+              <el-icon><VideoPlay /></el-icon>
               巡检
             </el-button>
           </template>

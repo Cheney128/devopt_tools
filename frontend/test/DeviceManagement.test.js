@@ -141,7 +141,7 @@ describe('DeviceManagement.vue', () => {
     await wrapper.vm.executeCommand()
     
     // 检查API是否被调用
-    expect(deviceApi.executeCommand).toHaveBeenCalledWith(27, 'system-view\nsysname NX-SW-33-R06-YW-test')
+    expect(deviceApi.executeCommand).toHaveBeenCalledWith(27, 'system-view\nsysname NX-SW-33-R06-YW-test', {}, null)
   })
 
   it('执行批量命令方法应调用deviceApi.batchExecuteCommand', async () => {
@@ -178,6 +178,6 @@ describe('DeviceManagement.vue', () => {
     await wrapper.vm.executeCommand()
     
     // 检查API是否被调用
-    expect(deviceApi.batchExecuteCommand).toHaveBeenCalledWith([27, 26], 'display version')
+    expect(deviceApi.batchExecuteCommand).toHaveBeenCalledWith([27, 26], 'display version', {}, null)
   })
 })

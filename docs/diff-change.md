@@ -422,3 +422,44 @@
 - 根据角色动态显示菜单（管理员显示用户管理）
 - 未登录时隐藏侧边栏和顶部导航
 **变更原因**：集成用户认证状态到主应用布局
+
+### 2026-02-04 11:20:00
+
+**变更文件**：frontend/src/api/index.js
+**变更位置**：1-13
+**变更内容**：
+- 新增 resolveApiBaseUrl(env) 方法：优先使用 VITE_API_BASE_URL，默认回退到 /api/v1
+- Axios 实例 baseURL 从硬编码 localhost 改为 resolveApiBaseUrl()
+**变更原因**：兼容本地开发与 Docker 生产部署，避免浏览器/容器内 localhost 指向错误导致验证码与 API 异常
+
+### 2026-02-04 11:20:00
+
+**变更文件**：frontend/vite.config.js
+**变更位置**：1-26
+**变更内容**：
+- 增加 dev server 代理：/api → VITE_DEV_PROXY_TARGET（默认 http://localhost:8000）
+**变更原因**：在开发环境使用相对路径 /api/v1 时，通过 Vite 代理把请求转发到本地后端，恢复验证码与登录联调
+
+### 2026-02-04 11:20:00
+
+**变更文件**：frontend/test/apiBaseUrl.test.js
+**变更位置**：1-13
+**变更内容**：
+- 新增 resolveApiBaseUrl 的回归测试（环境变量优先、默认回退）
+**变更原因**：防止后续改动再次引入硬编码 baseURL 或默认值错误
+
+### 2026-02-04 11:20:00
+
+**变更文件**：frontend/test/DeviceManagement.test.js
+**变更位置**：124-182
+**变更内容**：
+- 更新 executeCommand / batchExecuteCommand 的断言入参，匹配当前 API 额外参数（variables/templateId）
+**变更原因**：修复前端测试与实际函数签名不一致导致的用例失败，确保测试套件可稳定运行
+
+### 2026-02-04 11:20:00
+
+**变更文件**：frontend/src/views/InspectionManagement.vue
+**变更位置**：1-5，121，195
+**变更内容**：
+- 将未导出的 PlayCircle 图标替换为 VideoPlay
+**变更原因**：修复生产构建阶段 Rollup 报错，确保 npm run build 可通过

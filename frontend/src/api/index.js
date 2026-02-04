@@ -2,9 +2,11 @@ import axios from 'axios'
 import { ElMessage } from 'element-plus'
 import router from '../router'
 
+export const resolveApiBaseUrl = (env = import.meta.env) => env?.VITE_API_BASE_URL || '/api/v1'
+
 // 创建axios实例
 const api = axios.create({
-  baseURL: 'http://localhost:8000/api/v1',
+  baseURL: resolveApiBaseUrl(),
   timeout: 60000,
   headers: {
     'Content-Type': 'application/json'
