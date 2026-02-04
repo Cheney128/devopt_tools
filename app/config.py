@@ -5,8 +5,11 @@ from dotenv import load_dotenv
 import os
 from typing import Optional
 
-# 手动加载 .env 文件
-load_dotenv()
+# 配置优先级修复：
+# 1. 合一部署模式：完全依赖环境变量，不加载.env
+# 2. 非合一部署模式：加载.env，但使用override=False避免覆盖已有环境变量
+if os.getenv('DEPLOY_MODE') != 'unified':
+    load_dotenv(override=False)  # 不覆盖已存在的环境变量
 
 class Settings:
     """
@@ -31,4 +34,3 @@ class Settings:
 
 # 创建全局配置实例
 settings = Settings()
-

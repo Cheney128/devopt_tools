@@ -464,6 +464,136 @@
 - 将未导出的 PlayCircle 图标替换为 VideoPlay
 **变更原因**：修复生产构建阶段 Rollup 报错，确保 npm run build 可通过
 
+### 2026-02-04 14:30:00
+
+**变更文件**：docker/.dockerignore
+**变更位置**：1-70
+**变更内容**：
+- 新增docker/.dockerignore文件
+- 排除所有.env文件，防止进入镜像
+- 排除Python虚拟环境、IDE目录、缓存目录等
+- 排除Git相关文件和Docker相关文件
+**变更原因**：防止.env文件被复制到Docker镜像中，避免配置覆盖问题
+
+### 2026-02-04 14:30:00
+
+**变更文件**：docker/nginx.conf
+**变更位置**：1-61
+**变更内容**：
+- 新增Nginx配置文件
+- 配置前端静态资源服务（/unified-app/frontend/dist）
+- 配置API反向代理到后端（127.0.0.1:8000）
+- 配置健康检查端点（/health）
+**变更原因**：为前后端合一部署提供Nginx网关配置
+
+### 2026-02-04 14:30:00
+
+**变更文件**：docker/supervisord.conf
+**变更位置**：1-32
+**变更内容**：
+- 新增Supervisor配置文件
+- 配置backend服务：uvicorn启动，绑定127.0.0.1:8000，2个worker
+- 配置nginx服务：Nginx前台运行
+- 配置进程组管理
+**变更原因**：使用Supervisor管理合一容器内的多个进程
+
+### 2026-02-04 14:30:00
+
+**变更文件**：docker/entrypoint.sh
+**变更位置**：1-28
+**变更内容**：
+- 新增容器入口脚本
+- 创建日志目录并设置权限
+- 打印环境信息（DEPLOY_MODE、DATABASE_URL等）
+- 启动Supervisor
+**变更原因**：提供容器启动时的初始化和日志输出
+
+### 2026-02-04 14:30:00
+
+**变更文件**：docker/mysql-init.sql
+**变更位置**：1-16
+**变更内容**：
+- 新增MySQL初始化脚本
+- 创建switch_manage数据库
+- 授予应用用户权限
+**变更原因**：DB容器首次启动时自动初始化数据库
+
+### 2026-02-04 14:30:00
+
+**变更文件**：docker/Dockerfile.unified
+**变更位置**：1-95
+**变更内容**：
+- 新增合一部署Dockerfile
+- 阶段1：前端构建（Node.js）
+- 阶段2：基础镜像准备（Python + Nginx + Supervisor）
+- 阶段3：Python依赖安装
+- 阶段4：最终镜像组装
+- 暴露80端口，配置健康检查
+**变更原因**：构建前后端合一的Docker镜像
+
+### 2026-02-04 14:30:00
+
+**变更文件**：docker-compose.unified.yml
+**变更位置**：1-79
+**变更内容**：
+- 新增合一部署Docker Compose配置
+- app服务：合一容器，仅暴露80端口，连接DB容器
+- db服务：MySQL 5.7，不对外映射端口
+- 配置健康检查、资源限制、网络隔离
+**变更原因**：实现前后端合一 + 独立DB容器的部署架构
+
+### 2026-02-04 14:30:00
+
+**变更文件**：app/config.py
+**变更位置**：1-37
+**变更内容**：
+- 修改load_dotenv()调用逻辑
+- 合一部署模式（DEPLOY_MODE=unified）：不加载.env文件
+- 非合一部署模式：使用override=False避免覆盖环境变量
+**变更原因**：修复配置优先级问题，确保环境变量优先于.env文件
+
+### 2026-02-04 14:30:00
+
+**变更文件**：app/main.py
+**变更位置**：1-90
+**变更内容**：
+- 添加import os
+- 根据DEPLOY_MODE调整CORS配置
+- 在startup_event中打印DATABASE_URL和DEPLOY_MODE
+- 隐藏密码部分的安全处理
+**变更原因**：支持合一部署模式，便于排查配置来源问题
+
+### 2026-02-04 16:00:00
+
+**变更文件**：docker-compose.unified.yml
+**变更位置**：44-67
+**变更内容**：
+- 修复db服务健康检查密码不匹配问题：将`-p${MYSQL_ROOT_PASSWORD:-rootpassword}`改为`-p[OylKbYLJf*Hx((4dEIf]`
+- 统一环境变量语法格式：将`key: "value"`格式改为`key=value`格式
+- 添加MARIADB_DATABASE环境变量：支持自动创建数据库
+- 添加TZ时区配置：设置Asia/Shanghai时区
+**变更原因**：修复从MySQL 5.7迁移到MariaDB 11后的配置问题，确保健康检查正常工作，统一配置格式
+
+### 2026-02-04 17:30:00
+
+**变更文件**：docker/Dockerfile.unified
+**变更位置**：34-36
+**变更内容**：
+- 在apt-get install中添加字体包：`fonts-dejavu-core`
+- 修改前：`nginx supervisor net-tools curl git`
+- 修改后：`nginx supervisor net-tools curl git fonts-dejavu-core`
+**变更原因**：修复Docker环境前端验证码显示异常问题。验证码生成依赖PIL库加载字体文件，Docker容器缺少字体导致验证码图片生成失败。
+
+### 2026-02-04 17:30:00
+
+**变更文件**：app/core/security.py
+**变更位置**：102-120
+**变更内容**：
+- 优化字体加载逻辑，添加多个字体路径尝试
+- 修改前：仅尝试`arial.ttf`和`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`
+- 修改后：按顺序尝试多个字体路径：DejaVuSans、LiberationSans、Arial，最后使用默认字体
+**变更原因**：提高字体加载的兼容性，确保即使某个字体包安装失败，也能尝试其他字体路径，避免验证码生成完全失败。
+
 ### 2026-02-04 18:00:00
 
 **变更文件**：docs/功能需求/前后端合一部署/前后端合一部署方案-评审文档.md
