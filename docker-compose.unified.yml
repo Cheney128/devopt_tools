@@ -1,0 +1,78 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.unified
+      target: final
+    container_name: switch_manage_unified
+    ports:
+      # 仅暴露80端口
+      - "80:80"
+      # 可选：HTTPS端口
+      # - "443:443"
+    environment:
+      # 后端配置 - 连接独立DB容器
+      - DATABASE_URL=mysql+pymysql://${MYSQL_USER:-admin}:${MYSQL_PASSWORD:-password}@db:3306/${MYSQL_DATABASE:-switch_manage}
+      - APP_NAME=Switch Manage System
+      - APP_VERSION=1.0.0
+      - DEBUG=False
+      - DEPLOY_MODE=unified
+    volumes:
+      # 日志持久化
+      - app_logs:/unified-app/logs
+      # 可选：备份配置
+      - ./backups:/backups
+    restart: unless-stopped
+    networks:
+      - switch_manage_network
+    # 资源限制（使用Docker Compose标准字段）
+    mem_limit: 1g
+    cpus: '1.0'
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mysql:5.7
+    container_name: switch_manage_db
+    # 不对外映射端口，仅内部网络访问
+    environment:
+      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-rootpassword}
+      - MYSQL_USER=${MYSQL_USER:-admin}
+      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-password}
+      - MYSQL_DATABASE=${MYSQL_DATABASE:-switch_manage}
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    networks:
+      - switch_manage_network
+    # 资源限制
+    mem_limit: 512m
+    cpus: '0.5'
+    # 健康检查
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  mysql_data:
+    driver: local
+  app_logs:
+    driver: local
+
+networks:
+  switch_manage_network:
+    driver: bridge
