@@ -42,14 +42,15 @@ services:
         condition: service_healthy
 
   db:
-    image: mysql:5.7
+    image: mariadb:11
     container_name: switch_manage_db
     # 不对外映射端口，仅内部网络访问
     environment:
-      - MYSQL_ROOT_PASSWORD=${MYSQL_ROOT_PASSWORD:-rootpassword}
-      - MYSQL_USER=${MYSQL_USER:-admin}
-      - MYSQL_PASSWORD=${MYSQL_PASSWORD:-password}
-      - MYSQL_DATABASE=${MYSQL_DATABASE:-switch_manage}
+      - MARIADB_ROOT_PASSWORD=[OylKbYLJf*Hx((4dEIf]
+      - MARIADB_DATABASE=${MYSQL_DATABASE:-switch_manage}
+      - MARIADB_CHARACTER_SET=utf8mb4
+      - MARIADB_COLLATION=utf8mb4_unicode_ci
+      - TZ=Asia/Shanghai
     volumes:
       - mysql_data:/var/lib/mysql
       - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -61,7 +62,7 @@ services:
     cpus: '0.5'
     # 健康检查
     healthcheck:
-      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MYSQL_ROOT_PASSWORD:-rootpassword}"]
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p[OylKbYLJf*Hx((4dEIf]"]
       interval: 10s
       timeout: 5s
       retries: 5

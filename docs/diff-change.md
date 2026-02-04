@@ -562,3 +562,14 @@
 - 在startup_event中打印DATABASE_URL和DEPLOY_MODE
 - 隐藏密码部分的安全处理
 **变更原因**：支持合一部署模式，便于排查配置来源问题
+
+### 2026-02-04 16:00:00
+
+**变更文件**：docker-compose.unified.yml
+**变更位置**：44-67
+**变更内容**：
+- 修复db服务健康检查密码不匹配问题：将`-p${MYSQL_ROOT_PASSWORD:-rootpassword}`改为`-p[OylKbYLJf*Hx((4dEIf]`
+- 统一环境变量语法格式：将`key: "value"`格式改为`key=value`格式
+- 添加MARIADB_DATABASE环境变量：支持自动创建数据库
+- 添加TZ时区配置：设置Asia/Shanghai时区
+**变更原因**：修复从MySQL 5.7迁移到MariaDB 11后的配置问题，确保健康检查正常工作，统一配置格式
