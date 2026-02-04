@@ -573,3 +573,23 @@
 - 添加MARIADB_DATABASE环境变量：支持自动创建数据库
 - 添加TZ时区配置：设置Asia/Shanghai时区
 **变更原因**：修复从MySQL 5.7迁移到MariaDB 11后的配置问题，确保健康检查正常工作，统一配置格式
+
+### 2026-02-04 17:30:00
+
+**变更文件**：docker/Dockerfile.unified
+**变更位置**：34-36
+**变更内容**：
+- 在apt-get install中添加字体包：`fonts-dejavu-core`
+- 修改前：`nginx supervisor net-tools curl git`
+- 修改后：`nginx supervisor net-tools curl git fonts-dejavu-core`
+**变更原因**：修复Docker环境前端验证码显示异常问题。验证码生成依赖PIL库加载字体文件，Docker容器缺少字体导致验证码图片生成失败。
+
+### 2026-02-04 17:30:00
+
+**变更文件**：app/core/security.py
+**变更位置**：102-120
+**变更内容**：
+- 优化字体加载逻辑，添加多个字体路径尝试
+- 修改前：仅尝试`arial.ttf`和`/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf`
+- 修改后：按顺序尝试多个字体路径：DejaVuSans、LiberationSans、Arial，最后使用默认字体
+**变更原因**：提高字体加载的兼容性，确保即使某个字体包安装失败，也能尝试其他字体路径，避免验证码生成完全失败。
