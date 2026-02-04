@@ -1,54 +1,65 @@
 version: '3.8'
 
 services:
-  # 后端服务
-  backend:
+  app:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: switch_manage_backend
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-    environment:
-      - DATABASE_URL=mysql://admin:password@db:3306/switch_manage
-    depends_on:
-      - db
-    networks:
-      - switch_manage_network
-
-  # 前端服务
-  frontend:
-    build:
-      context: ./frontend
-      dockerfile: Dockerfile.frontend
-    container_name: switch_manage_frontend
+      dockerfile: docker/Dockerfile.unified
+      target: final
+    container_name: switch_manage_unified
     ports:
       - "80:80"
-    depends_on:
-      - backend
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:[OylKbYLJf*Hx((4dEIf]@db:3306/switch_manage
+      - APP_NAME=Switch Manage System
+      - APP_VERSION=1.0.0
+      - DEBUG=False
+      - DEPLOY_MODE=unified
+    volumes:
+      - app_logs:/unified-app/logs
+      - ./backups:/backups
+    restart: unless-stopped
     networks:
       - switch_manage_network
+    mem_limit: 1g
+    cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      - db
 
-  # MySQL数据库
   db:
-    image: mysql:5.7
+    image: mariadb:11
     container_name: switch_manage_db
-    ports:
-      - "3306:3306"
     environment:
-      - MYSQL_ROOT_PASSWORD=password
-      - MYSQL_DATABASE=switch_manage
-      - MYSQL_USER=admin
-      - MYSQL_PASSWORD=password
+      MARIADB_ROOT_PASSWORD: "[OylKbYLJf*Hx((4dEIf]"
+      MARIADB_DATABASE: "switch_manage"
+      MARIADB_CHARACTER_SET: "utf8mb4"
+      MARIADB_COLLATION: "utf8mb4_unicode_ci"
+      TZ: "Asia/Shanghai"
     volumes:
       - mysql_data:/var/lib/mysql
+    restart: unless-stopped
     networks:
       - switch_manage_network
+    mem_limit: 512m
+    cpus: '0.5'
+    healthcheck:
+      test: ["CMD-SHELL", "mariadb -u root -p\"$$MARIADB_ROOT_PASSWORD\" -e 'SELECT 1' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
 
 volumes:
   mysql_data:
+    driver: local
+  app_logs:
+    driver: local
 
 networks:
   switch_manage_network:

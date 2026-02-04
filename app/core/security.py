@@ -17,7 +17,8 @@ from app.config import settings
 
 
 # 密码哈希上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# 使用pbkdf2_sha256方案，避免bcrypt的72字节密码长度限制
+pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
 
 
 # JWT 配置
@@ -101,13 +102,22 @@ def create_captcha_image(code: str, width: int = 120, height: int = 40) -> str:
     draw = ImageDraw.Draw(image)
     
     # 尝试加载字体，如果失败则使用默认字体
-    try:
-        font = ImageFont.truetype("arial.ttf", 24)
-    except:
+    font_paths = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",  # Debian/Ubuntu (安装fonts-dejavu-core)
+        "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf",  # CentOS/RHEL
+        "arial.ttf",  # Windows
+    ]
+    
+    font = None
+    for font_path in font_paths:
         try:
-            font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 24)
+            font = ImageFont.truetype(font_path, 24)
+            break
         except:
-            font = ImageFont.load_default()
+            continue
+    
+    if font is None:
+        font = ImageFont.load_default()
     
     # 添加干扰线
     for _ in range(5):
