@@ -189,3 +189,49 @@
 **变更内容**：
 - 从技术栈总览图中将Oxidized替换为Git
 **变更原因**：更新技术栈分析文档，反映使用Git替代Oxidized进行配置版本管理
+
+### 2026-02-03 16:30:00
+
+**变更文件**：docker-compose.yml
+**变更位置**：91
+**变更内容**：
+- 将 MySQL 初始化脚本从 `./scripts/init_db.py` 改为 `./scripts/init_db.sql`
+**变更原因**：MySQL 官方镜像的 `/docker-entrypoint-initdb.d/` 目录只支持 `.sh`、`.sql`、`.sql.gz` 格式，Python 脚本无法被执行
+
+### 2026-02-03 16:30:00
+
+**变更文件**：scripts/init_db.sql
+**变更位置**：1-145
+**变更内容**：
+- 创建了新的 SQL 初始化脚本，包含所有数据库表的创建语句
+- 包括 devices、ports、vlans、inspections、configurations、mac_addresses、device_versions、backup_schedules、command_templates、command_history、git_configs 等表
+**变更原因**：替代原有的 Python 初始化脚本，使 MySQL 容器启动时能自动创建数据库表结构
+
+### 2026-02-03 16:30:00
+
+**变更文件**：frontend/Dockerfile.frontend
+**变更位置**：12-15
+**变更内容**：
+- 移除了 `package-lock.json` 的复制
+- 将 `npm ci --only=production` 改为 `npm install`
+**变更原因**：项目没有 package-lock.json 文件，使用 npm install 更兼容
+
+### 2026-02-03 16:30:00
+
+**变更文件**：frontend/Dockerfile.frontend
+**变更位置**：37-48
+**变更内容**：
+- 移除了创建非 root 用户的相关代码
+- 移除了 `USER nginxuser` 指令
+- 简化为只创建必要的目录
+**变更原因**：Nginx 使用非 root 用户可能导致权限问题，简化配置以提高兼容性
+
+### 2026-02-04 09:43:26
+
+**变更文件**：docs/功能需求/前端/登录与用户管理模块实施方案-gpt-5.2.md
+**变更位置**：1-443
+**变更内容**：
+- 新增《登录功能模块与用户管理功能模块实施方案（gpt-5.2）》
+- 将后端接口约定明确为“沿用现有接口风格”：成功直接返回业务数据；失败使用HTTP状态码+detail
+- 对前端鉴权闭环（Axios拦截器+路由守卫+菜单渲染）与接口形状进行对齐说明
+**变更原因**：在不重构现有后端响应结构的前提下，给出可落地、与现有代码一致的登录与用户管理实施方案，降低集成成本与风格割裂风险
