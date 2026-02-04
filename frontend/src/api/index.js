@@ -1,4 +1,6 @@
 import axios from 'axios'
+import { ElMessage } from 'element-plus'
+import router from '../router'
 
 // 创建axios实例
 const api = axios.create({
@@ -8,6 +10,20 @@ const api = axios.create({
     'Content-Type': 'application/json'
   }
 })
+
+// 请求拦截器 - 自动添加 Authorization Header
+api.interceptors.request.use(
+  config => {
+    const token = localStorage.getItem('token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  error => {
+    return Promise.reject(error)
+  }
+)
 
 // 响应拦截器
 api.interceptors.response.use(
@@ -20,6 +36,48 @@ api.interceptors.response.use(
   },
   error => {
     console.error('API Error:', error)
+    
+    const { response } = error
+    
+    if (response) {
+      const { status, data } = response
+      const detail = data?.detail || '操作失败'
+      
+      switch (status) {
+        case 401:
+          // 未登录或 Token 过期
+          ElMessage.error('登录已过期，请重新登录')
+          localStorage.removeItem('token')
+          router.push('/login')
+          break
+        case 403:
+          // 无权限
+          ElMessage.error('权限不足，无法执行此操作')
+          break
+        case 404:
+          // 资源不存在
+          ElMessage.error('请求的资源不存在')
+          break
+        case 409:
+          // 冲突（如用户名已存在）
+          ElMessage.error(detail)
+          break
+        case 422:
+          // 参数校验错误
+          ElMessage.error(detail || '请求参数错误')
+          break
+        case 500:
+          // 服务器错误
+          ElMessage.error('服务器内部错误，请稍后重试')
+          break
+        default:
+          ElMessage.error(detail || '操作失败')
+      }
+    } else {
+      // 网络错误
+      ElMessage.error('网络连接失败，请检查网络')
+    }
+    
     return Promise.reject(error)
   }
 )

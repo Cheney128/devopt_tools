@@ -7,6 +7,7 @@ from sqlalchemy.orm import sessionmaker
 
 from app.config import settings
 from app.models.models import Base
+from app.models.user_models import User, Role, Permission, CaptchaRecord, user_roles, role_permissions
 
 # 配置 pymysql 作为 MySQL 驱动
 import pymysql
@@ -34,3 +35,10 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+__all__ = [
+    'Base', 'get_db', 'engine', 'SessionLocal',
+    'User', 'Role', 'Permission', 'CaptchaRecord',
+    'user_roles', 'role_permissions'
+]

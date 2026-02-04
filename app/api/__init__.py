@@ -3,12 +3,14 @@ API路由主文件
 """
 from fastapi import APIRouter
 
-from app.api.endpoints import devices, ports, vlans, inspections, configurations, device_collection, git_configs, command_templates, command_history
+from app.api.endpoints import devices, ports, vlans, inspections, configurations, device_collection, git_configs, command_templates, command_history, auth, users
 
 # 创建API路由器
 api_router = APIRouter()
 
 # 注册各模块路由
+api_router.include_router(auth.router, prefix="/auth", tags=["auth"])
+api_router.include_router(users.router, prefix="/users", tags=["users"])
 api_router.include_router(devices.router, prefix="/devices", tags=["devices"])
 api_router.include_router(ports.router, prefix="/ports", tags=["ports"])
 api_router.include_router(vlans.router, prefix="/vlans", tags=["vlans"])

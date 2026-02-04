@@ -16,6 +16,10 @@ pandas>=2.2.0
 openpyxl==3.1.2
 # Git操作依赖
 gitpython==3.1.43
+# 认证相关依赖
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
+pillow==10.1.0
 # CORS已在FastAPI内置，不需要单独安装
 
 # 开发依赖
