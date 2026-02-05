@@ -29,7 +29,10 @@ class Settings:
         self.PROJECT_NAME = os.getenv('PROJECT_NAME', 'Switch Manage System')
 
         # CORS配置
-        self.BACKEND_CORS_ORIGINS = ["*"]
+        self.BACKEND_CORS_ORIGINS = [
+            "http://localhost:5173",  # Vite开发服务器
+            "http://localhost:3000",  # 备用开发端口
+        ]
 
 
 # 创建全局配置实例
