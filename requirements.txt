@@ -12,7 +12,9 @@ paramiko==3.4.0
 httpx==0.25.2
 python-multipart==0.0.5
 # Excel处理依赖
-pandas>=2.2.0
+# 固定numpy和pandas版本以避免SIGSEGV段错误（numpy 2.0+与pandas兼容性问题）
+numpy==1.26.4
+pandas==2.2.0
 openpyxl==3.1.2
 # Git操作依赖
 gitpython==3.1.43
