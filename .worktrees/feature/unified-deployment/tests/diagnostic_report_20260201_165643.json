@@ -1,0 +1,187 @@
+{
+  "diagnosis_time": "2026-02-01T16:56:43.595761",
+  "device_config": {
+    "ip_address": "192.168.80.21",
+    "port": 22,
+    "username": "njadmin",
+    "vendor": "Huawei"
+  },
+  "layer_status": {
+    "network": true,
+    "ssh": true,
+    "netmiko": true,
+    "backend": false,
+    "integration": true
+  },
+  "overall_status": "异常",
+  "results": [
+    {
+      "timestamp": "2026-02-01T16:56:32.122264",
+      "level": "INFO",
+      "component": "DNS",
+      "message": "解析主机名: 192.168.80.21",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:32.124607",
+      "level": "SUCCESS",
+      "component": "DNS",
+      "message": "主机名解析成功: 192.168.80.21 -> 192.168.80.21",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:32.124607",
+      "level": "INFO",
+      "component": "Ping",
+      "message": "测试到 192.168.80.21 的连通性",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:35.156495",
+      "level": "SUCCESS",
+      "component": "Ping",
+      "message": "网络连通性正常 - 最短 = 0ms，最长 = 1ms，平均 = 0ms",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:35.156495",
+      "level": "INFO",
+      "component": "Port",
+      "message": "测试端口 22 连通性",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:35.168700",
+      "level": "SUCCESS",
+      "component": "Port",
+      "message": "端口 22 开放且可连接",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:35.243962",
+      "level": "INFO",
+      "component": "SSH-Protocol",
+      "message": "检测SSH协议版本",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:35.437576",
+      "level": "SUCCESS",
+      "component": "SSH-Protocol",
+      "message": "SSH协议版本: SSH-2.0--",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:35.438077",
+      "level": "INFO",
+      "component": "SSH-Auth",
+      "message": "测试SSH认证 (用户: njadmin)",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:36.358878",
+      "level": "SUCCESS",
+      "component": "SSH-Auth",
+      "message": "SSH认证成功，命令执行正常",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:36.358878",
+      "level": "INFO",
+      "component": "Device",
+      "message": "检测到华为设备",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:36.468173",
+      "level": "INFO",
+      "component": "Netmiko",
+      "message": "使用设备类型: huawei",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:36.468173",
+      "level": "INFO",
+      "component": "Netmiko",
+      "message": "尝试建立Netmiko连接...",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:37.295840",
+      "level": "SUCCESS",
+      "component": "Netmiko",
+      "message": "Netmiko连接成功",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:37.295840",
+      "level": "INFO",
+      "component": "Netmiko",
+      "message": "测试命令执行...",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:38.635017",
+      "level": "SUCCESS",
+      "component": "Netmiko",
+      "message": "命令执行成功，输出长度: 237",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:40.837421",
+      "level": "SUCCESS",
+      "component": "Netmiko",
+      "message": "连接正常关闭",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:40.975476",
+      "level": "INFO",
+      "component": "Backend",
+      "message": "测试后端API服务: http://localhost:8000/api/v1",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:43.593730",
+      "level": "ERROR",
+      "component": "Backend",
+      "message": "API服务无法访问: All connection attempts failed",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:43.593730",
+      "level": "INFO",
+      "component": "Backend",
+      "message": "检查数据库连接...",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:43.593730",
+      "level": "SUCCESS",
+      "component": "Backend",
+      "message": "数据库连接检查通过",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:43.594733",
+      "level": "SUCCESS",
+      "component": "Frontend",
+      "message": "前端API配置文件存在: E:\\BaiduSyncdisk\\5.code\\netdevops\\switch_manage\\frontend\\src\\api\\index.js",
+      "details": {}
+    },
+    {
+      "timestamp": "2026-02-01T16:56:43.594733",
+      "level": "SUCCESS",
+      "component": "Frontend",
+      "message": "前端API地址配置正确",
+      "details": {}
+    }
+  ],
+  "recommendations": [
+    {
+      "priority": "高",
+      "issue": "API服务不可用",
+      "solution": "确保后端服务已启动: uvicorn app.main:app --reload"
+    }
+  ]
+}

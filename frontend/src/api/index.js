@@ -87,6 +87,22 @@ api.interceptors.response.use(
 // 设备API
 export const deviceApi = {
   getDevices: (params) => api.get('/devices', { params }),
+  /**
+   * 获取所有设备（无分页限制）
+   * @param {Object} params - 查询参数
+   * @param {number} params.limit - 限制返回数量（默认100，最大5000）
+   * @param {number} params.offset - 偏移量（默认0）
+   * @param {string} params.status - 按状态筛选
+   * @param {string} params.vendor - 按厂商筛选
+   * @returns {Promise<{devices: Array, total: number, limit: number, offset: number}>}
+   */
+  getAllDevices: (params = {}) => api.get('/devices/all', { 
+    params: {
+      limit: 100,
+      offset: 0,
+      ...params
+    }
+  }),
   getDevice: (id) => api.get(`/devices/${id}`),
   createDevice: (data) => api.post('/devices', data),
   updateDevice: (id, data) => api.put(`/devices/${id}`, data),

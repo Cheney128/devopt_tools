@@ -1,9 +1,9 @@
 """
 设备管理API路由
 """
-from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File
+from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, File, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi.responses import StreamingResponse
 from io import BytesIO
 
@@ -51,6 +51,38 @@ def get_devices(
         "devices": devices,
         "page": page,
         "page_size": page_size
+    }
+
+
+@router.get("/all", response_model=Dict[str, Any])
+async def get_all_devices(
+    limit: int = Query(default=100, ge=1, le=5000, description="限制返回设备数量，默认100，最大5000"),
+    offset: int = Query(default=0, ge=0, description="偏移量，用于分页"),
+    status: Optional[str] = Query(None, description="按状态筛选"),
+    vendor: Optional[str] = Query(None, description="按厂商筛选"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取所有设备列表，不受分页限制
+    - 用于前端设备选择器等需要完整列表的场景
+    - 默认最多返回100条记录，可通过limit参数调整，最大5000条
+    """
+    query = db.query(Device)
+    
+    if status:
+        query = query.filter(Device.status == status)
+    
+    if vendor:
+        query = query.filter(Device.vendor == vendor)
+    
+    total = query.count()
+    devices = query.offset(offset).limit(limit).all()
+    
+    return {
+        "devices": devices,
+        "total": total,
+        "limit": limit,
+        "offset": offset
     }
 
 
@@ -522,27 +554,46 @@ def batch_import_devices(
 ):
     """
     批量导入设备数据
-    
+
     Args:
         file: Excel文件
         skip_existing: 是否跳过已存在的设备，False则更新
         db: SQLAlchemy会话
-    
+
     Returns:
         导入结果统计
     """
+    import traceback
+    import logging
+
+    logger = logging.getLogger(__name__)
+
     # 验证文件类型
     if not file.filename.endswith('.xlsx'):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="仅支持.xlsx格式文件"
         )
-    
+
+    # 验证文件大小（限制10MB）
+    max_file_size = 10 * 1024 * 1024  # 10MB
+    file.file.seek(0, 2)  # 移动到文件末尾
+    file_size = file.file.tell()
+    file.file.seek(0)  # 重置到文件开头
+
+    if file_size > max_file_size:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"文件大小超过限制（最大10MB）"
+        )
+
     # 读取文件内容
     try:
+        logger.info(f"开始批量导入设备，文件名: {file.filename}, 大小: {file_size} bytes")
         file_content = BytesIO(file.file.read())
         result = import_devices_from_excel(file_content, db, skip_existing=skip_existing)
-        
+
+        logger.info(f"批量导入完成: {result['success']} 成功, {result['skipped']} 跳过, {result['failed']} 失败")
         return BatchOperationResult(
             success=result['failed'] == 0,
             message=f"批量导入完成: {result['success']} 成功, {result['skipped']} 跳过, {result['failed']} 失败",
@@ -551,8 +602,13 @@ def batch_import_devices(
             failed_count=result['failed'],
             failed_devices=result['errors'] if result['errors'] else None
         )
+    except HTTPException:
+        raise
     except Exception as e:
+        error_msg = f"导入失败: {str(e)}"
+        logger.error(error_msg)
+        logger.error(traceback.format_exc())
         raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"导入失败: {str(e)}"
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=error_msg
         )

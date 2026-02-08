@@ -845,3 +845,83 @@ pandas==2.2.0
 - 将DEBUG从True改为False
 
 **变更原因**：适配Docker容器内部网络环境，使用服务名db代替IP地址，确保容器间通信正常。同时设置生产环境DEBUG=False。
+
+### 2026-02-06 18:00:00
+
+**变更文件**：app/api/endpoints/devices.py
+**变更位置**：1-15, 55-88
+**变更内容**：
+- 添加Query和Dict, Any导入
+- 新增 `/devices/all` API端点，支持获取所有设备列表（不受分页限制）
+- 支持limit参数（默认100，最大5000）、offset参数（默认0）
+- 支持status和vendor筛选参数
+- 返回完整的分页信息（devices, total, limit, offset）
+
+**变更原因**：修复设备列表显示问题，通过新增无分页限制的API，解决前端设备选择器无法获取完整设备列表的问题。
+
+### 2026-02-06 18:00:00
+
+**变更文件**：frontend/src/api/index.js
+**变更位置**：88-105
+**变更内容**：
+- 在deviceApi对象中新增getAllDevices方法
+- 支持limit、offset、status、vendor查询参数
+- 默认limit=100, offset=0
+
+**变更原因**：前端新增设备API接口，用于调用后端新增的/devices/all端点获取完整设备列表。
+
+### 2026-02-06 18:00:00
+
+**变更文件**：frontend/src/views/ConfigurationManagement.vue
+**变更位置**：280-295, 238-248
+**变更内容**：
+- 修改loadDevices方法，使用getAllDevices替代getDevices
+- 添加loading状态管理和详细错误处理
+- 修改handleSelectChange方法，添加Set去重逻辑
+- 全选时使用Set确保设备ID唯一性
+
+**变更原因**：修改设备加载逻辑使用新的getAllDevices API，解决分页导致的设备列表显示不完整问题，同时添加去重逻辑避免重复选择。
+
+### 2026-02-08 10:00:00
+
+**变更文件**：docs/功能需求/前端/plans/批量配置备份功能/Phase2-批量备份功能/实施计划.md
+**变更位置**：数据库模型、异步任务执行、前端组件
+**变更内容**：
+Phase 2实施计划优化：
+1. 数据库模型增加复合索引：idx_backup_task_status_created、idx_backup_task_idempotency
+2. 异步任务执行改进：
+   - 完善异常处理，使用try-except-finally确保资源清理
+   - 改进状态管理，任务失败时更新状态和错误详情
+   - 支持任务取消时的中断信号处理
+3. 前端轮询优化：
+   - 实现退避算法减少服务器负载（baseInterval + checkCount*200）
+   - 最大间隔限制为10000ms
+   - 添加轮询计数器避免无限轮询
+
+**变更原因**：根据Phase 2评审文档的建议，优化批量备份功能的数据库查询性能、异常处理机制和前端轮询策略。
+
+### 2026-02-08 10:30:00
+
+**变更文件**：docs/功能需求/前端/plans/批量配置备份功能/Phase3-备份计划监控面板/实施计划.md
+**变更位置**：数据库模型、调度器、监控API、前端组件
+**变更内容**：
+Phase 3实施计划优化：
+1. 数据库模型增强：
+   - 新增trigger_type字段区分手动和计划触发
+   - 新增复合索引：idx_backup_log_task_id、idx_backup_log_created_status、idx_backup_log_trigger_type
+2. 调度器日志记录改进：
+   - 添加数据库会话管理（should_close_db标志）
+   - 完善异常处理和事务回滚机制
+   - 计划执行完成后更新计划的最后执行状态和下次执行时间
+3. 监控API查询优化：
+   - backup_statistics API使用聚合查询替代多次独立查询
+   - execution_trend API使用批量查询替代循环查询（N+1问题修复）
+   - 添加参数验证（ge/le约束）
+4. 前端组件增强：
+   - 添加ECharts resize监听处理
+   - 添加页面可见性控制（Page Visibility API）
+   - 添加重试机制和用户错误提示
+   - 完善加载状态管理
+   - 添加图表初始化配置
+
+**变更原因**：根据Phase 3评审文档的建议，优化备份监控面板的查询性能、异常处理、前端图表交互和用户体验。

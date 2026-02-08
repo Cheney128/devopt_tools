@@ -17,8 +17,13 @@ from app.config import settings
 
 
 # 密码哈希上下文
-# 使用pbkdf2_sha256方案，避免bcrypt的72字节密码长度限制
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+# 使用pbkdf2_sha256作为默认方案，同时支持bcrypt用于验证旧密码
+# 避免bcrypt的72字节密码长度限制，同时保持向后兼容
+pwd_context = CryptContext(
+    schemes=["pbkdf2_sha256", "bcrypt"],
+    deprecated="auto",
+    default="pbkdf2_sha256"
+)
 
 
 # JWT 配置

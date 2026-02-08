@@ -238,8 +238,12 @@ export default {
     const handleSelectChange = (values) => {
       // 检查是否选择了"全选"选项
       if (values.includes('select-all')) {
-        // 选择所有设备，并移除"select-all"值
-        selectedDeviceIds.value = deviceList.value.map(device => device.id)
+        // 全选模式：获取所有设备ID并使用Set去重
+        const allIds = deviceList.value.map(device => device.id)
+        selectedDeviceIds.value = [...new Set(allIds)]
+      } else {
+        // 正常选择模式：过滤掉select-all标记
+        selectedDeviceIds.value = values.filter(id => id !== 'select-all')
       }
     }
     
@@ -278,11 +282,22 @@ export default {
     }
 
     const loadDevices = async () => {
+      loading.value = true
       try {
-        const response = await deviceApi.getDevices()
+        // 使用新的getAllDevices API获取完整设备列表
+        const response = await deviceApi.getAllDevices()
         deviceList.value = response.devices || []
+        console.log(`已加载 ${deviceList.value.length} 个设备，总计 ${response.total} 个`)
       } catch (error) {
-        ElMessage.error('获取设备列表失败')
+        console.error('加载设备列表失败:', error)
+        ElMessage.error({
+          message: `加载设备列表失败: ${error.message || '未知错误'}`,
+          type: 'error',
+          duration: 5000,
+          showClose: true
+        })
+      } finally {
+        loading.value = false
       }
     }
 
