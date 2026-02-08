@@ -63,8 +63,8 @@ class GitService:
             
             # 克隆远程仓库
             if git_config.username and git_config.password:
-                # 使用用户名密码认证
-                repo_url = git_config.repo_url.replace('https://', f'https://{git_config.username}:{git_config.password}@')
+                # 使用 Personal Access Token 认证（推荐）
+                repo_url = git_config.repo_url.replace('https://', f'https://oauth2:{git_config.password}@')
             else:
                 repo_url = git_config.repo_url
             

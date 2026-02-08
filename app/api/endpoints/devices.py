@@ -79,7 +79,7 @@ async def get_all_devices(
     devices = query.offset(offset).limit(limit).all()
     
     return {
-        "devices": devices,
+        "devices": [DeviceSchema.model_validate(device) for device in devices],
         "total": total,
         "limit": limit,
         "offset": offset

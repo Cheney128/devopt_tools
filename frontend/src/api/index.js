@@ -184,12 +184,32 @@ export const configurationApi = {
   getConfigDiff: (configId1, configId2) => api.get(`/configurations/diff/${configId1}/${configId2}`),
   commitConfigToGit: (id) => api.post(`/configurations/${id}/commit-git`),
   // 备份相关API
-    createBackupSchedule: (data) => api.post('/configurations/backup-schedules', data),
-    getBackupSchedules: (params) => api.get('/configurations/backup-schedules', { params }),
-    updateBackupSchedule: (id, data) => api.put(`/configurations/backup-schedules/${id}`, data),
-    deleteBackupSchedule: (id) => api.delete(`/configurations/backup-schedules/${id}`),
-    batchCreateBackupSchedules: (deviceIds, data) => api.post('/configurations/backup-schedules/batch', { device_ids: deviceIds, ...data }),
-    backupNow: (deviceId) => api.post(`/configurations/device/${deviceId}/backup-now`)
+  createBackupSchedule: (data) => api.post('/configurations/backup-schedules', data),
+  getBackupSchedules: (params) => api.get('/configurations/backup-schedules', { params }),
+  updateBackupSchedule: (id, data) => api.put(`/configurations/backup-schedules/${id}`, data),
+  deleteBackupSchedule: (id) => api.delete(`/configurations/backup-schedules/${id}`),
+  batchCreateBackupSchedules: (deviceIds, data) => api.post('/configurations/backup-schedules/batch', { device_ids: deviceIds, ...data }),
+  backupNow: (deviceId) => api.post(`/configurations/device/${deviceId}/backup-now`),
+  // 批量备份API
+  backupAll: (params = {}) => api.post('/configurations/backup-all', {
+    filter_status: params.filter_status || null,
+    filter_vendor: params.filter_vendor || null,
+    async_execute: params.async_execute !== false,
+    notify_on_complete: params.notify_on_complete || false,
+    priority: params.priority || 'normal',
+    max_concurrent: params.max_concurrent || 3,
+    timeout: params.timeout || 300,
+    retry_count: params.retry_count || 2
+  }),
+  getBackupTaskStatus: (taskId) => api.get(`/configurations/backup-tasks/${taskId}`),
+  getBackupTasks: (params = {}) => api.get('/configurations/backup-tasks', {
+    params: {
+      page: params.page || 1,
+      page_size: params.page_size || 20,
+      status: params.status || null
+    }
+  }),
+  cancelBackupTask: (taskId) => api.post(`/configurations/backup-tasks/${taskId}/cancel`)
 }
 
 // Git配置API
@@ -201,6 +221,36 @@ export const gitConfigApi = {
   deleteGitConfig: (id) => api.delete(`/git-configs/${id}`),
   testGitConnection: (id) => api.post(`/git-configs/${id}/test`),
   setActiveGitConfig: (id) => api.post(`/git-configs/active/${id}`)
+}
+
+// 监控API
+export const monitoringApi = {
+  // 获取备份统计信息
+  getStatistics: () => api.get('/configurations/monitoring/statistics'),
+  
+  // 获取仪表盘摘要
+  getDashboard: () => api.get('/configurations/monitoring/dashboard'),
+  
+  // 获取执行日志列表
+  getExecutionLogs: (params = {}) => api.get('/configurations/monitoring/execution-logs', {
+    params: {
+      page: params.page || 1,
+      page_size: params.page_size || 20,
+      status: params.status || null,
+      device_id: params.deviceId || null,
+      trigger_type: params.triggerType || null,
+      start_date: params.startDate || null,
+      end_date: params.endDate || null
+    }
+  }),
+  
+  // 获取备份趋势数据
+  getTrends: (days = 7) => api.get('/configurations/monitoring/trends', {
+    params: { days }
+  }),
+  
+  // 获取设备备份统计
+  getDeviceStatistics: () => api.get('/configurations/monitoring/devices/statistics')
 }
 
 // 设备采集API

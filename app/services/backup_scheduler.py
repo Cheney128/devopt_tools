@@ -7,9 +7,10 @@ from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy.orm import Session
 from typing import Optional
 import logging
+import uuid
 
 from app.models import get_db
-from app.models.models import BackupSchedule, Device, Configuration
+from app.models.models import BackupSchedule, Device, Configuration, BackupExecutionLog
 from app.services.netmiko_service import NetmikoService
 from app.services.git_service import GitService
 from datetime import datetime
@@ -144,7 +145,11 @@ class BackupSchedulerService:
         """
         执行设备配置备份
         """
-        logger.info(f"Executing backup for device {device_id}")
+        task_id = f"scheduled_{uuid.uuid4().hex[:8]}"
+        logger.info(f"Executing backup for device {device_id}, task_id: {task_id}")
+        
+        started_at = datetime.now()
+        execution_log = None
         
         try:
             # 导入需要的服务
@@ -157,11 +162,64 @@ class BackupSchedulerService:
             
             # 调用现有的配置采集函数
             from app.api.endpoints.configurations import collect_config_from_device
-            await collect_config_from_device(device_id, db, netmiko_service, git_service)
+            result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
             
-            logger.info(f"Backup completed successfully for device {device_id}")
+            # 计算执行时间
+            execution_time = (datetime.now() - started_at).total_seconds()
+            
+            # 查找对应的备份计划
+            schedule = db.query(BackupSchedule).filter(
+                BackupSchedule.device_id == device_id,
+                BackupSchedule.is_active == True
+            ).first()
+            
+            # 创建执行日志
+            execution_log = BackupExecutionLog(
+                task_id=task_id,
+                device_id=device_id,
+                schedule_id=schedule.id if schedule else None,
+                status="success",
+                execution_time=execution_time,
+                trigger_type="scheduled",
+                config_id=result.get("config_id"),
+                config_size=result.get("config_size", 0),
+                git_commit_id=result.get("git_commit_id"),
+                started_at=started_at,
+                completed_at=datetime.now()
+            )
+            db.add(execution_log)
+            
+            # 更新备份计划的最后执行时间
+            if schedule:
+                schedule.last_run_time = datetime.now()
+            
+            db.commit()
+            logger.info(f"Backup completed successfully for device {device_id}, task_id: {task_id}")
+            
         except Exception as e:
-            logger.error(f"Backup failed for device {device_id}: {str(e)}")
+            error_message = str(e)
+            logger.error(f"Backup failed for device {device_id}: {error_message}")
+            
+            # 查找对应的备份计划
+            schedule = db.query(BackupSchedule).filter(
+                BackupSchedule.device_id == device_id,
+                BackupSchedule.is_active == True
+            ).first()
+            
+            # 创建失败日志
+            execution_log = BackupExecutionLog(
+                task_id=task_id,
+                device_id=device_id,
+                schedule_id=schedule.id if schedule else None,
+                status="failed",
+                execution_time=(datetime.now() - started_at).total_seconds(),
+                trigger_type="scheduled",
+                error_message=error_message,
+                started_at=started_at,
+                completed_at=datetime.now()
+            )
+            db.add(execution_log)
+            db.commit()
 
 
 # 创建全局备份调度器实例

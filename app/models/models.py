@@ -2,7 +2,7 @@
 数据模型定义
 定义数据库表结构
 """
-from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, JSON, Boolean
+from sqlalchemy import Column, Integer, String, Text, Float, DateTime, ForeignKey, JSON, Boolean, Index
 from sqlalchemy.orm import declarative_base, relationship
 from sqlalchemy.sql import func
 from datetime import datetime
@@ -43,6 +43,7 @@ class Device(Base):
     mac_addresses = relationship("MACAddress", back_populates="device", cascade="all, delete-orphan")
     device_versions = relationship("DeviceVersion", back_populates="device", cascade="all, delete-orphan")
     backup_schedules = relationship("BackupSchedule", back_populates="device", cascade="all, delete-orphan")
+    backup_execution_logs = relationship("BackupExecutionLog", back_populates="device", cascade="all, delete-orphan")
 
 
 class Port(Base):
@@ -155,6 +156,69 @@ class BackupSchedule(Base):
     
     # 关联关系
     device = relationship("Device", back_populates="backup_schedules")
+
+
+class BackupExecutionLog(Base):
+    """
+    备份执行日志表
+    记录每次备份任务的执行情况，用于备份计划监控面板
+    """
+    __tablename__ = "backup_execution_logs"
+    
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    task_id = Column(String(50), index=True, nullable=False)
+    device_id = Column(Integer, ForeignKey("devices.id"), nullable=False)
+    schedule_id = Column(Integer, ForeignKey("backup_schedules.id"), nullable=True)
+    
+    # 执行状态
+    status = Column(String(20), nullable=False)
+    execution_time = Column(Float, nullable=True)
+    trigger_type = Column(String(20), default="scheduled")
+    
+    # 备份结果
+    config_id = Column(Integer, ForeignKey("configurations.id"), nullable=True)
+    error_message = Column(Text, nullable=True)
+    error_details = Column(Text, nullable=True)
+    
+    # 执行上下文
+    started_at = Column(DateTime, nullable=True)
+    completed_at = Column(DateTime, nullable=True)
+    
+    # 统计信息
+    config_size = Column(Integer, nullable=True)
+    git_commit_id = Column(String(40), nullable=True)
+    
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    
+    # 复合索引
+    __table_args__ = (
+        Index("idx_backup_log_device_time", "device_id", "created_at"),
+        Index("idx_backup_log_status", "status"),
+        Index("idx_backup_log_schedule", "schedule_id", "created_at"),
+        Index("idx_backup_log_task_id", "task_id"),
+        Index("idx_backup_log_created_status", "created_at", "status"),
+        Index("idx_backup_log_trigger_type", "trigger_type"),
+    )
+    
+    # 关联关系
+    device = relationship("Device", back_populates="backup_execution_logs")
+    schedule = relationship("BackupSchedule", back_populates="execution_logs")
+    configuration = relationship("Configuration", back_populates="execution_logs")
+
+
+# 为 BackupSchedule 类添加关联
+BackupSchedule.execution_logs = relationship(
+    "BackupExecutionLog", 
+    back_populates="schedule", 
+    cascade="all, delete-orphan"
+)
+
+# 为 Configuration 类添加关联
+Configuration.execution_logs = relationship(
+    "BackupExecutionLog", 
+    back_populates="configuration", 
+    cascade="all, delete-orphan"
+)
 
 
 class MACAddress(Base):

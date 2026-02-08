@@ -47,7 +47,7 @@
           :loading="loading"
         >
           <el-icon><Upload /></el-icon>
-          备份配置
+          备份选中设备 ({{ selectedDeviceIds.length }}台)
         </el-button>
         <el-button
           type="warning"
@@ -57,6 +57,71 @@
           <el-icon><Clock /></el-icon>
           备份设置
         </el-button>
+        <el-button
+          type="danger"
+          @click="handleBackupAll"
+          :loading="backupAllLoading"
+          :disabled="deviceList.length === 0"
+        >
+          <el-icon><Lightning /></el-icon>
+          备份所有设备 ({{ deviceList.length }}台)
+        </el-button>
+      </div>
+
+      <!-- 批量备份进度显示 -->
+      <div v-if="showBackupAllProgress" class="backup-progress">
+        <el-card class="progress-card">
+          <template #header>
+            <div class="progress-header">
+              <span>批量备份进度</span>
+              <el-tag :type="backupAllStatusType">{{ backupAllStatusText }}</el-tag>
+            </div>
+          </template>
+          
+          <div class="progress-stats">
+            <el-statistic title="总设备数" :value="backupAllTotal" />
+            <el-statistic title="已备份" :value="backupAllCompleted" />
+            <el-statistic title="成功" :value="backupAllSuccessCount" />
+            <el-statistic title="失败" :value="backupAllFailedCount" />
+          </div>
+          
+          <el-progress
+            :percentage="backupAllProgressPercent"
+            :status="backupAllProgressStatus"
+            :stroke-width="20"
+            text-inside
+          />
+          
+          <div class="progress-actions">
+            <el-button 
+              v-if="backupAllStatus === 'running'"
+              type="danger" 
+              size="small"
+              @click="handleCancelBackupAll"
+              :loading="cancelingBackup"
+            >
+              取消备份
+            </el-button>
+            <el-button 
+              v-if="backupAllStatus === 'completed' || backupAllStatus === 'failed' || backupAllStatus === 'cancelled'"
+              size="small"
+              @click="handleCloseBackupAllProgress"
+            >
+              关闭
+            </el-button>
+          </div>
+          
+          <div v-if="backupAllErrors.length > 0" class="backup-errors">
+            <el-divider>失败设备 ({{ backupAllErrors.length }})</el-divider>
+            <el-scrollbar height="150px">
+              <div v-for="(error, index) in backupAllErrors" :key="index" class="error-item">
+                <el-tag type="danger" size="small">失败</el-tag>
+                <span class="device-name">{{ error.device_name || '设备 ' + error.device_id }}</span>
+                <span class="error-message">{{ error.error_message }}</span>
+              </div>
+            </el-scrollbar>
+          </div>
+        </el-card>
       </div>
 
       <el-table
@@ -191,8 +256,8 @@
 
 <script>
 import { ref, reactive, computed, onMounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Document, Download, Upload, Clock } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Document, Download, Upload, Clock, Lightning } from '@element-plus/icons-vue'
 import { configurationApi, deviceApi } from '../api/index'
 
 export default {
@@ -201,11 +266,14 @@ export default {
     Document,
     Download,
     Upload,
-    Clock
+    Clock,
+    Lightning
   },
   setup() {
     const loading = ref(false)
     const backupLoading = ref(false)
+    const backupAllLoading = ref(false)
+    const cancelingBackup = ref(false)
     const configList = ref([])
     const deviceList = ref([])
     const selectedDeviceIds = ref([])
@@ -221,6 +289,17 @@ export default {
     const backupProgressText = ref('')
     const backupResults = ref([])
     const cancelBackup = ref(false)
+    
+    // 批量备份所有设备进度相关
+    const showBackupAllProgress = ref(false)
+    const backupAllTaskId = ref(null)
+    const backupAllStatus = ref('idle')
+    const backupAllTotal = ref(0)
+    const backupAllCompleted = ref(0)
+    const backupAllSuccessCount = ref(0)
+    const backupAllFailedCount = ref(0)
+    const backupAllErrors = ref([])
+    const backupAllPollingTimer = ref(null)
 
     const backupForm = reactive({
       scheduleType: 'daily',
@@ -348,6 +427,181 @@ export default {
       }
       showBackupDialog.value = true
     }
+    
+    // 批量备份所有设备
+    const handleBackupAll = async () => {
+      try {
+        await ElMessageBox.confirm(
+          `确定要备份所有 ${deviceList.value.length} 台设备吗？`,
+          '批量备份确认',
+          {
+            confirmButtonText: '确定备份',
+            cancelButtonText: '取消',
+            type: 'warning'
+          }
+        )
+      } catch {
+        return
+      }
+      
+      backupAllLoading.value = true
+      showBackupAllProgress.value = true
+      
+      // 重置进度状态
+      backupAllStatus.value = 'pending'
+      backupAllTotal.value = deviceList.value.length
+      backupAllCompleted.value = 0
+      backupAllSuccessCount.value = 0
+      backupAllFailedCount.value = 0
+      backupAllErrors.value = []
+      
+      try {
+        const response = await configurationApi.backupAll({
+          async_execute: true
+        })
+        
+        backupAllTaskId.value = response.task_id
+        backupAllStatus.value = response.status
+        
+        if (response.status === 'pending' || response.status === 'running') {
+          // 开始轮询检查任务状态
+          startBackupAllPolling()
+        } else {
+          // 立即完成
+          updateBackupAllStatus(response)
+        }
+        
+        ElMessage.success(`已启动批量备份任务: ${response.task_id}`)
+      } catch (error) {
+        ElMessage.error(`启动批量备份失败: ${error.message || '未知错误'}`)
+        showBackupAllProgress.value = false
+        backupAllLoading.value = false
+      }
+    }
+    
+    // 开始轮询备份任务状态
+    const startBackupAllPolling = () => {
+      if (backupAllPollingTimer.value) {
+        clearInterval(backupAllPollingTimer.value)
+      }
+      
+      // 立即检查一次
+      checkBackupAllStatus()
+      
+      // 每2秒轮询一次
+      backupAllPollingTimer.value = setInterval(() => {
+        if (backupAllStatus.value === 'pending' || backupAllStatus.value === 'running') {
+          checkBackupAllStatus()
+        } else {
+          // 任务完成，停止轮询
+          stopBackupAllPolling()
+        }
+      }, 2000)
+    }
+    
+    // 停止轮询
+    const stopBackupAllPolling = () => {
+      if (backupAllPollingTimer.value) {
+        clearInterval(backupAllPollingTimer.value)
+        backupAllPollingTimer.value = null
+      }
+    }
+    
+    // 检查备份任务状态
+    const checkBackupAllStatus = async () => {
+      if (!backupAllTaskId.value) return
+      
+      try {
+        const response = await configurationApi.getBackupTaskStatus(backupAllTaskId.value)
+        updateBackupAllStatus(response)
+      } catch (error) {
+        console.error('检查备份状态失败:', error)
+      }
+    }
+    
+    // 更新备份状态显示
+    const updateBackupAllStatus = (response) => {
+      backupAllStatus.value = response.status
+      backupAllCompleted.value = response.completed || 0
+      backupAllSuccessCount.value = response.success_count || 0
+      backupAllFailedCount.value = response.failed_count || 0
+      
+      // 更新错误列表
+      if (response.error_details && response.error_details.errors) {
+        backupAllErrors.value = response.error_details.errors
+      }
+      
+      // 检查是否完成
+      if (response.status === 'completed' || response.status === 'failed' || response.status === 'cancelled') {
+        backupAllLoading.value = false
+        ElMessage({
+          message: `批量备份完成！成功: ${backupAllSuccessCount.value}, 失败: ${backupAllFailedCount.value}`,
+          type: backupAllFailedCount.value === 0 ? 'success' : 'warning',
+          duration: 5000
+        })
+      }
+    }
+    
+    // 取消批量备份
+    const handleCancelBackupAll = async () => {
+      if (!backupAllTaskId.value) return
+      
+      try {
+        cancelingBackup.value = true
+        await configurationApi.cancelBackupTask(backupAllTaskId.value)
+        backupAllStatus.value = 'cancelled'
+        stopBackupAllPolling()
+        ElMessage.warning('批量备份任务已取消')
+      } catch (error) {
+        ElMessage.error(`取消备份失败: ${error.message || '未知错误'}`)
+      } finally {
+        cancelingBackup.value = false
+      }
+    }
+    
+    // 关闭批量备份进度显示
+    const handleCloseBackupAllProgress = () => {
+      showBackupAllProgress.value = false
+      stopBackupAllPolling()
+      backupAllTaskId.value = null
+      backupAllStatus.value = 'idle'
+    }
+    
+    // 批量备份进度计算属性
+    const backupAllProgressPercent = computed(() => {
+      if (backupAllTotal.value === 0) return 0
+      return Math.round((backupAllCompleted.value / backupAllTotal.value) * 100)
+    })
+    
+    const backupAllStatusText = computed(() => {
+      const statusMap = {
+        idle: '等待中',
+        pending: '等待执行',
+        running: '执行中',
+        completed: '已完成',
+        failed: '失败',
+        cancelled: '已取消'
+      }
+      return statusMap[backupAllStatus.value] || '未知'
+    })
+    
+    const backupAllStatusType = computed(() => {
+      const typeMap = {
+        idle: 'info',
+        pending: 'warning',
+        running: 'primary',
+        completed: 'success',
+        failed: 'danger',
+        cancelled: 'info'
+      }
+      return typeMap[backupAllStatus.value] || 'info'
+    })
+    
+    const backupAllProgressStatus = computed(() => {
+      if (backupAllStatus.value === 'failed') return 'exception'
+      if (backupAllStatus.value === 'completed') return 'success'
+      return ''
+    })
 
     const handleSaveBackup = async () => {
       if (selectedDeviceIds.value.length === 0) {
@@ -476,6 +730,8 @@ export default {
     return {
       loading,
       backupLoading,
+      backupAllLoading,
+      cancelingBackup,
       configList,
       deviceList,
       selectedDeviceIds,
@@ -483,13 +739,25 @@ export default {
       pageSize,
       totalCount,
       showBackupDialog,
-      backupForm,
-      // 备份进度相关
       showBackupProgress,
       backupProgress,
       backupProgressStatus,
       backupProgressText,
       backupResults,
+      cancelBackup,
+      showBackupAllProgress,
+      backupAllTaskId,
+      backupAllStatus,
+      backupAllTotal,
+      backupAllCompleted,
+      backupAllSuccessCount,
+      backupAllFailedCount,
+      backupAllErrors,
+      backupAllProgressPercent,
+      backupAllStatusText,
+      backupAllStatusType,
+      backupAllProgressStatus,
+      backupForm,
       formatTime,
       handleSelectChange,
       handleGetConfig,
@@ -498,7 +766,10 @@ export default {
       handleSaveBackup,
       handleCancelBackup,
       handleDownload,
-      handleCommitToGit
+      handleCommitToGit,
+      handleBackupAll,
+      handleCancelBackupAll,
+      handleCloseBackupAllProgress
     }
   }
 }
