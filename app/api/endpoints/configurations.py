@@ -484,10 +484,12 @@ async def create_backup_schedule(
         return {"success": False, "message": f"Failed to create backup schedule: {str(e)}"}
 
 
-@router.get("/backup-schedules", response_model=List[BackupScheduleSchema])
+@router.get("/backup-schedules", response_model=Dict[str, Any])
 def get_backup_schedules(
     device_id: Optional[int] = None,
     is_active: Optional[bool] = None,
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
     db: Session = Depends(get_db)
 ):
     """
@@ -503,7 +505,14 @@ def get_backup_schedules(
     if is_active is not None:
         query = query.filter(BackupSchedule.is_active == is_active)
     
-    results = query.order_by(BackupSchedule.created_at.desc()).all()
+    # 获取总数
+    total = query.count()
+    
+    # 分页查询
+    results = query.order_by(BackupSchedule.created_at.desc()) \
+                   .offset((page - 1) * page_size) \
+                   .limit(page_size) \
+                   .all()
     
     # 转换为备份任务模式列表
     schedules = []
@@ -521,7 +530,11 @@ def get_backup_schedules(
         }
         schedules.append(BackupScheduleSchema(**schedule_dict))
     
-    return schedules
+    # 返回前端期望的格式
+    return {
+        "schedules": schedules,
+        "total": total
+    }
 
 
 @router.get("/backup-schedules/{schedule_id}", response_model=BackupScheduleSchema)
