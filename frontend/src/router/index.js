@@ -48,6 +48,12 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/monitoring',
+      name: 'monitoring',
+      component: () => import('../views/BackupMonitoring.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/device-collection',
       name: 'device-collection',
       component: () => import('../views/DeviceCollection.vue'),

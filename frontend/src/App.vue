@@ -125,6 +125,10 @@ onMounted(() => {
               <el-icon><DocumentIcon /></el-icon>
               <span>配置管理</span>
             </el-menu-item>
+            <el-menu-item index="/monitoring">
+              <el-icon><DataAnalysisIcon /></el-icon>
+              <span>备份监控</span>
+            </el-menu-item>
             <el-menu-item index="/device-collection">
               <el-icon><MonitorIcon /></el-icon>
               <span>设备采集</span>
