@@ -13,7 +13,8 @@ import {
   FolderOpened as GitIcon,
   UserFilled as UserIcon,
   User as UserManagementIcon,
-  SwitchButton as LogoutIcon
+  SwitchButton as LogoutIcon,
+  Calendar as CalendarIcon
 } from '@element-plus/icons-vue'
 import { useAuthStore } from './stores/authStore'
 
@@ -124,6 +125,10 @@ onMounted(() => {
             <el-menu-item index="/configurations">
               <el-icon><DocumentIcon /></el-icon>
               <span>配置管理</span>
+            </el-menu-item>
+            <el-menu-item index="/backup-schedules">
+              <el-icon><CalendarIcon /></el-icon>
+              <span>备份计划</span>
             </el-menu-item>
             <el-menu-item index="/monitoring">
               <el-icon><DataAnalysisIcon /></el-icon>

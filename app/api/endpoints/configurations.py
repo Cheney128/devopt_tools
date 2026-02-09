@@ -258,8 +258,10 @@ async def collect_config_from_device(
         if latest_config and latest_config.config_content == config_content:
             return {
                 "success": True,
-                "message": "Config has not changed",
-                "config_id": latest_config.id
+                "message": "配置无变化，已成功登录并验证",
+                "config_id": latest_config.id,
+                "config_changed": False,
+                "config_size": len(config_content) if config_content else 0
             }
         
         # 生成版本号

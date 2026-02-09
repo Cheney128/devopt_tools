@@ -54,6 +54,12 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
+      path: '/backup-schedules',
+      name: 'backup-schedules',
+      component: () => import('../views/BackupScheduleManagement.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
       path: '/device-collection',
       name: 'device-collection',
       component: () => import('../views/DeviceCollection.vue'),

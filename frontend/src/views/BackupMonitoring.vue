@@ -96,7 +96,11 @@
           </el-table-column>
           <el-table-column prop="error_message" label="备注" show-overflow-tooltip>
             <template #default="{ row }">
-              {{ row.error_message || '-' }}
+              <span v-if="row.error_message" :class="{ 'no-change-badge': row.error_message.includes('配置无变化') }">
+                <el-icon v-if="row.error_message.includes('配置无变化')"><Info-Filled /></el-icon>
+                {{ row.error_message }}
+              </span>
+              <span v-else>-</span>
             </template>
           </el-table-column>
         </el-table>
@@ -180,14 +184,15 @@
 
 <script>
 import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
-import { Refresh } from '@element-plus/icons-vue'
+import { Refresh, InfoFilled } from '@element-plus/icons-vue'
 import { monitoringApi } from '../api/index'
 import * as echarts from 'echarts'
 
 export default {
   name: 'BackupMonitoring',
   components: {
-    Refresh
+    Refresh,
+    InfoFilled
   },
   setup() {
     const loading = ref(false)
@@ -483,5 +488,12 @@ export default {
 .pagination {
   margin-top: 20px;
   justify-content: flex-end;
+}
+
+.no-change-badge {
+  color: #67c23a;
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 </style>

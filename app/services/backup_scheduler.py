@@ -173,6 +173,14 @@ class BackupSchedulerService:
                 BackupSchedule.is_active == True
             ).first()
             
+            # 判断配置是否变化
+            config_changed = result.get("config_changed", True)
+            
+            # 构建备注信息
+            error_message = None
+            if not config_changed:
+                error_message = "配置无变化，已成功登录并验证设备配置"
+            
             # 创建执行日志
             execution_log = BackupExecutionLog(
                 task_id=task_id,
@@ -184,6 +192,7 @@ class BackupSchedulerService:
                 config_id=result.get("config_id"),
                 config_size=result.get("config_size", 0),
                 git_commit_id=result.get("git_commit_id"),
+                error_message=error_message,
                 started_at=started_at,
                 completed_at=datetime.now()
             )
