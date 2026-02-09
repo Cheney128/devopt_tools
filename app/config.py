@@ -28,6 +28,10 @@ class Settings:
         self.API_V1_STR = os.getenv('API_V1_STR', '/api/v1')
         self.PROJECT_NAME = os.getenv('PROJECT_NAME', 'Switch Manage System')
 
+        # JWT 密钥配置 - 使用固定密钥，避免后端重启后 token 失效
+        # 生产环境应该通过环境变量设置，开发环境使用默认密钥
+        self.SECRET_KEY = os.getenv('SECRET_KEY', 'switch-manage-dev-secret-key-2024-very-long-and-secure')
+
         # CORS配置
         self.BACKEND_CORS_ORIGINS = [
             "http://localhost:5173",  # Vite开发服务器

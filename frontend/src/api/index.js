@@ -37,8 +37,6 @@ api.interceptors.response.use(
     return response.data
   },
   error => {
-    console.error('API Error:', error)
-
     const { response, config } = error
 
     if (response) {
@@ -87,7 +85,7 @@ api.interceptors.response.use(
       // 网络错误
       ElMessage.error('网络连接失败，请检查网络')
     }
-    
+
     return Promise.reject(error)
   }
 )

@@ -30,6 +30,7 @@ pwd_context = CryptContext(
 SECRET_KEY = getattr(settings, 'SECRET_KEY', None)
 if not SECRET_KEY:
     # 如果没有配置，生成一个随机密钥（仅用于开发环境）
+    # 注意：这会导致后端重启后所有 token 失效
     SECRET_KEY = secrets.token_urlsafe(32)
     
 ALGORITHM = "HS256"
