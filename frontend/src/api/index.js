@@ -50,7 +50,10 @@ api.interceptors.response.use(
           // 未登录或 Token 过期
           ElMessage.error('登录已过期，请重新登录')
           localStorage.removeItem('token')
-          router.push('/login')
+          // 使用 window.location 跳转，避免在拦截器中使用 router 导致循环依赖
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login'
+          }
           break
         case 403:
           // 无权限

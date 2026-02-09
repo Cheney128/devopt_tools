@@ -90,46 +90,36 @@ const router = createRouter({
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
-  // 初始化认证状态
-  if (!authStore.user && authStore.token) {
-    try {
-      await authStore.fetchCurrentUser()
-    } catch (error) {
-      // 获取用户信息失败，清除 token
-      authStore.logout()
-    }
+  // 等待初始化完成（只执行一次）
+  if (!authStore.isInitialized && authStore.token) {
+    await authStore.init()
   }
 
   const isLoggedIn = authStore.isLoggedIn
 
   // 1. 已登录用户访问登录页，重定向到首页
   if (to.path === '/login' && isLoggedIn) {
-    next('/')
-    return
+    return next('/')
   }
 
   // 2. 公开页面，直接访问
   if (to.meta.public) {
-    next()
-    return
+    return next()
   }
 
   // 3. 需要登录的页面
   if (to.meta.requiresAuth) {
     if (!isLoggedIn) {
-      // 未登录，重定向到登录页
-      next({
+      return next({
         path: '/login',
         query: { redirect: to.fullPath }
       })
-      return
     }
 
     // 4. 检查管理员权限
     if (to.meta.requiresAdmin && !authStore.isAdmin) {
       ElMessage.error('权限不足，无法访问该页面')
-      next('/')
-      return
+      return next('/')
     }
   }
 

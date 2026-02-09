@@ -1,5 +1,5 @@
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -55,10 +55,8 @@ const goToProfile = () => {
   router.push('/profile')
 }
 
-// 初始化
-onMounted(() => {
-  authStore.init()
-})
+// 注意：初始化逻辑已移至路由守卫中统一管理
+// 不再需要在 onMounted 中调用 authStore.init()
 </script>
 
 <template>
