@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
+import { ElMessage } from 'element-plus'
 import { authApi } from '../api/auth'
 
 export const useAuthStore = defineStore('auth', () => {
@@ -101,7 +102,7 @@ export const useAuthStore = defineStore('auth', () => {
   const init = async () => {
     // 避免重复初始化
     if (!token.value || isInitialized.value) return
-    
+
     isLoading.value = true
     try {
       await fetchCurrentUser()
@@ -109,9 +110,12 @@ export const useAuthStore = defineStore('auth', () => {
       console.error('初始化用户信息失败:', error)
       // 只有 401 错误才清除登录状态
       if (error.response?.status === 401) {
+        // Token 无效，清除登录状态
         token.value = ''
         user.value = null
         localStorage.removeItem('token')
+        // 显示错误消息
+        ElMessage.error('登录已过期，请重新登录')
       }
       // 其他错误（网络错误等）保持当前状态，让用户可以继续尝试
     } finally {
