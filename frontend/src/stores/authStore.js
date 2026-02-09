@@ -41,14 +41,17 @@ export const useAuthStore = defineStore('auth', () => {
     isLoading.value = true
     try {
       const response = await authApi.login(credentials)
-      
+
       // 保存 token
       token.value = response.access_token
       localStorage.setItem('token', response.access_token)
-      
+
       // 保存用户信息
       user.value = response.user
-      
+
+      // 标记已初始化（登录成功即表示已初始化）
+      isInitialized.value = true
+
       return response
     } catch (error) {
       console.error('登录失败:', error)
