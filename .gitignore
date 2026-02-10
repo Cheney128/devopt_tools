@@ -8,6 +8,9 @@ venv/
 # Trae IDE
 .trae/
 
+# Git worktrees
+.worktrees/
+
 # IDE directories and files
 .vscode/
 .idea/
