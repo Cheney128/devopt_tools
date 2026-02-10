@@ -925,3 +925,14 @@ Phase 3实施计划优化：
    - 添加图表初始化配置
 
 **变更原因**：根据Phase 3评审文档的建议，优化备份监控面板的查询性能、异常处理、前端图表交互和用户体验。
+
+### 2026-02-10 14:20:00
+
+**变更文件**：app/api/endpoints/devices.py
+**变更位置**：57-86
+**变更内容**：
+- 修改 `get_all_devices` 函数，在返回设备列表前，将 SQLAlchemy 模型对象转换为 Pydantic 模型
+- 添加转换代码：`device_schemas = [DeviceSchema.from_orm(device) for device in devices]`
+- 返回的 devices 字段从 SQLAlchemy 对象列表改为 Pydantic 模型列表
+
+**变更原因**：修复配置管理页面设备选择器无法加载设备列表的问题。原代码直接返回 SQLAlchemy 对象列表，FastAPI 无法序列化，导致 500 错误。通过转换为 Pydantic 模型，确保 API 响应可以正确序列化为 JSON。

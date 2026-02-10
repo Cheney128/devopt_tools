@@ -68,18 +68,21 @@ async def get_all_devices(
     - 默认最多返回100条记录，可通过limit参数调整，最大5000条
     """
     query = db.query(Device)
-    
+
     if status:
         query = query.filter(Device.status == status)
-    
+
     if vendor:
         query = query.filter(Device.vendor == vendor)
-    
+
     total = query.count()
     devices = query.offset(offset).limit(limit).all()
-    
+
+    # 将SQLAlchemy对象转换为Pydantic模型
+    device_schemas = [DeviceSchema.from_orm(device) for device in devices]
+
     return {
-        "devices": devices,
+        "devices": device_schemas,
         "total": total,
         "limit": limit,
         "offset": offset
