@@ -11,7 +11,6 @@
         </div>
       </template>
 
-      <!-- 筛选栏 -->
       <div class="filter-bar">
         <el-select
           v-model="filterDeviceId"
@@ -52,7 +51,6 @@
         <el-button @click="handleReset">重置</el-button>
       </div>
 
-      <!-- 批量操作 -->
       <div class="batch-actions" v-if="selectedSchedules.length > 0">
         <el-button type="success" size="small" @click="handleBatchEnable">
           <el-icon><Check /></el-icon>
@@ -69,7 +67,6 @@
         <span class="selected-count">已选择 {{ selectedSchedules.length }} 项</span>
       </div>
 
-      <!-- 备份计划列表 -->
       <el-table
         v-loading="loading"
         :data="scheduleList"
@@ -140,7 +137,6 @@
         </el-table-column>
       </el-table>
 
-      <!-- 分页 -->
       <div class="pagination">
         <el-pagination
           v-model:current-page="currentPage"
@@ -154,7 +150,6 @@
       </div>
     </el-card>
 
-    <!-- 创建/编辑对话框 -->
     <el-dialog
       v-model="showDialog"
       :title="dialogMode === 'create' ? '新建备份计划' : '编辑备份计划'"
@@ -237,7 +232,7 @@ import {
   Close, 
   VideoPlay 
 } from '@element-plus/icons-vue'
-import { configurationApi, deviceApi } from '../api/index'
+import { configurationApi, deviceApi } from '../../api/index'
 
 export default {
   name: 'BackupScheduleManagement',
@@ -260,15 +255,13 @@ export default {
     const pageSize = ref(10)
     const totalCount = ref(0)
     const showDialog = ref(false)
-    const dialogMode = ref('create') // 'create' | 'edit'
+    const dialogMode = ref('create')
     const formRef = ref(null)
 
-    // 筛选条件
     const filterDeviceId = ref('')
     const filterStatus = ref('')
     const filterType = ref('')
 
-    // 表单数据
     const formData = reactive({
       id: null,
       device_id: null,
@@ -279,7 +272,6 @@ export default {
       is_active: true
     })
 
-    // 表单验证规则
     const formRules = {
       device_id: [
         { required: true, message: '请选择设备', trigger: 'change' }
@@ -348,7 +340,6 @@ export default {
 
         const response = await configurationApi.getBackupSchedules(params)
         
-        // 为每个计划添加备份加载状态
         scheduleList.value = (response.schedules || []).map(schedule => ({
           ...schedule,
           backupLoading: false
@@ -399,7 +390,6 @@ export default {
       dialogMode.value = 'edit'
       resetForm()
       
-      // 填充表单数据
       formData.id = schedule.id
       formData.device_id = schedule.device_id
       formData.device_name = schedule.device_name
@@ -434,7 +424,6 @@ export default {
             is_active: formData.is_active
           }
 
-          // 根据类型添加时间参数
           if (formData.schedule_type === 'daily' || formData.schedule_type === 'monthly') {
             payload.schedule_time = formData.schedule_time
           }
@@ -502,7 +491,6 @@ export default {
           }
         )
 
-        // 逐个删除
         for (const schedule of selectedSchedules.value) {
           await configurationApi.deleteBackupSchedule(schedule.id)
         }
@@ -528,7 +516,6 @@ export default {
       } catch (error) {
         console.error('更新状态失败:', error)
         ElMessage.error('更新状态失败')
-        // 恢复原状态
         schedule.is_active = !newStatus
       }
     }
@@ -582,7 +569,6 @@ export default {
       try {
         await configurationApi.backupNow(schedule.device_id)
         ElMessage.success('立即备份任务已启动')
-        // 刷新列表以获取最新状态
         setTimeout(() => {
           loadSchedules()
         }, 2000)
@@ -651,7 +637,7 @@ export default {
 
 <style scoped>
 .backup-schedule-management {
-  padding: 0 20px;
+  padding: 0;
 }
 
 .card-header {

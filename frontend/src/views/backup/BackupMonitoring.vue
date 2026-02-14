@@ -13,7 +13,6 @@
         </div>
       </template>
 
-      <!-- 统计概览 -->
       <el-row :gutter="20" class="stats-row">
         <el-col :span="6">
           <el-card shadow="never" class="stat-card">
@@ -41,7 +40,6 @@
         </el-col>
       </el-row>
 
-      <!-- 趋势图表 -->
       <el-row :gutter="20" class="chart-row">
         <el-col :span="16">
           <el-card shadow="hover">
@@ -61,7 +59,6 @@
         </el-col>
       </el-row>
 
-      <!-- 执行日志 -->
       <el-card shadow="hover" class="log-card">
         <template #header>
           <div class="card-header">
@@ -97,7 +94,7 @@
           <el-table-column prop="error_message" label="备注" show-overflow-tooltip>
             <template #default="{ row }">
               <span v-if="row.error_message" :class="{ 'no-change-badge': row.error_message.includes('配置无变化') }">
-                <el-icon v-if="row.error_message.includes('配置无变化')"><Info-Filled /></el-icon>
+                <el-icon v-if="row.error_message.includes('配置无变化')"><InfoFilled /></el-icon>
                 {{ row.error_message }}
               </span>
               <span v-else>-</span>
@@ -108,7 +105,6 @@
 
     </el-card>
 
-    <!-- 全部日志对话框 -->
     <el-dialog
       v-model="showLogsDialog"
       title="执行日志"
@@ -185,7 +181,7 @@
 <script>
 import { ref, reactive, onMounted, onUnmounted, nextTick } from 'vue'
 import { Refresh, InfoFilled } from '@element-plus/icons-vue'
-import { monitoringApi } from '../api/index'
+import { monitoringApi } from '../../api/index'
 import * as echarts from 'echarts'
 
 export default {
@@ -448,7 +444,7 @@ export default {
 
 <style scoped>
 .backup-monitoring {
-  padding: 20px;
+  padding: 0;
 }
 
 .card-header {

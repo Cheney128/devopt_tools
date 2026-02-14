@@ -83,7 +83,40 @@
 
 ---
 
-## 变更 7：更新数据库模型分析文档
+## 变更 7：备份管理模块重构
+
+- **变更的日期**：2026-02-14 15:30
+- **变更的文件**：
+  - 新增：frontend/src/views/BackupManagement.vue
+  - 新增：frontend/src/views/backup/BackupOverview.vue
+  - 新增：frontend/src/views/backup/BackupScheduleManagement.vue
+  - 新增：frontend/src/views/backup/BackupMonitoring.vue
+  - 新增：frontend/src/views/backup/GitConfigManagement.vue
+  - 删除：frontend/src/views/ConfigurationManagement.vue
+  - 删除：frontend/src/views/BackupScheduleManagement.vue（原位置）
+  - 删除：frontend/src/views/BackupMonitoring.vue（原位置）
+  - 删除：frontend/src/views/GitConfigManagement.vue（原位置）
+  - 修改：frontend/src/router/index.js
+  - 修改：frontend/src/App.vue
+- **变更的位置**：
+  - 新增 frontend/src/views/backup/ 目录
+  - 路由配置全部重写
+  - 侧边栏菜单精简
+- **变更的内容**：
+  1. 创建 BackupManagement.vue 主页面，使用 el-tabs 实现 Tab 切换
+  2. 创建 BackupOverview.vue 概览页面，包含统计卡片、快捷操作、趋势图表
+  3. 将原有的备份计划、备份监控、Git配置组件移动到 backup/ 子目录
+  4. 更新路由配置：
+     - 新增 /backup-management 路由
+     - 添加旧路由重定向（/configurations、/backup-schedules、/monitoring、/git-configs）
+  5. 更新 App.vue 侧边栏菜单：
+     - 将"配置管理"更名为"备份管理"
+     - 移除独立的"备份计划"、"备份监控"、"Git配置"菜单项
+- **变更的原因**：根据前端页面设计文档，将备份相关功能整合到一个模块中，简化菜单结构，提升用户体验
+
+---
+
+## 变更 8：更新数据库模型分析文档
 
 - **变更的日期**：2026-02-14 10:30
 - **变更的文件**：docs/项目分析/04-数据库模型分析.md

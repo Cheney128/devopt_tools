@@ -1,10 +1,9 @@
 <script setup>
 import { ref, onMounted, reactive } from 'vue'
-import { ElMessage, ElMessageBox, ElForm, ElFormItem, ElInput, ElSelect, ElOption, ElSwitch, ElButton, ElTable, ElTableColumn, ElSpace } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Edit, Delete, Check, Close, Refresh } from '@element-plus/icons-vue'
-import { gitConfigApi } from '../api/index'
+import { gitConfigApi } from '../../api/index'
 
-// 响应式数据
 const loading = ref(false)
 const gitConfigs = ref([])
 const showForm = ref(false)
@@ -13,7 +12,6 @@ const currentConfig = ref(null)
 const activeConfig = ref(null)
 const formRef = ref(null)
 
-// 表单数据
 const form = reactive({
   repo_url: '',
   username: '',
@@ -23,7 +21,6 @@ const form = reactive({
   is_active: true
 })
 
-// 表单验证规则
 const rules = {
   repo_url: [
     { required: true, message: '请输入Git仓库URL', trigger: 'blur' },
@@ -34,13 +31,11 @@ const rules = {
   ]
 }
 
-// 方法
 const fetchGitConfigs = async () => {
   loading.value = true
   try {
     const response = await gitConfigApi.getGitConfigs()
     gitConfigs.value = response || []
-    // 找到活跃的配置
     activeConfig.value = gitConfigs.value.find(config => config.is_active)
   } catch (error) {
     ElMessage.error('获取Git配置列表失败')
@@ -50,7 +45,6 @@ const fetchGitConfigs = async () => {
 }
 
 const openForm = (config = null) => {
-  // 重置表单
   Object.assign(form, {
     repo_url: '',
     username: '',
@@ -60,23 +54,20 @@ const openForm = (config = null) => {
     is_active: true
   })
   
-  // 检查config是否为有效的Git配置对象（具有id属性）
   const isEditMode = config && typeof config === 'object' && config.id !== undefined && config.id !== null
   
   if (isEditMode) {
-    // 编辑模式
     isEdit.value = true
     currentConfig.value = config
     Object.assign(form, {
       repo_url: config.repo_url,
       username: config.username || '',
-      password: '', // 不显示密码
+      password: '',
       branch: config.branch,
       ssh_key_path: config.ssh_key_path || '',
       is_active: config.is_active
     })
   } else {
-    // 新增模式
     isEdit.value = false
     currentConfig.value = null
   }
@@ -91,7 +82,6 @@ const closeForm = () => {
 }
 
 const saveGitConfig = async () => {
-  // 表单验证
   if (!formRef.value) return
   
   try {
@@ -104,14 +94,12 @@ const saveGitConfig = async () => {
   loading.value = true
   try {
     if (isEdit.value) {
-      // 更新配置
       if (!currentConfig.value || !currentConfig.value.id) {
         throw new Error('当前编辑的配置ID无效')
       }
       await gitConfigApi.updateGitConfig(currentConfig.value.id, form)
       ElMessage.success('Git配置更新成功')
     } else {
-      // 新增配置
       await gitConfigApi.createGitConfig(form)
       ElMessage.success('Git配置创建成功')
     }
@@ -197,7 +185,6 @@ const setActiveConfig = async (config) => {
   }
 }
 
-// 生命周期钩子
 onMounted(() => {
   fetchGitConfigs()
 })
@@ -218,7 +205,6 @@ onMounted(() => {
         </div>
       </template>
 
-      <!-- Git配置列表 -->
       <el-table
         v-loading="loading"
         :data="gitConfigs"
@@ -274,7 +260,6 @@ onMounted(() => {
         </el-table-column>
       </el-table>
 
-      <!-- 活跃配置提示 -->
       <div class="active-config-tip" v-if="activeConfig">
         <el-alert
           title="当前活跃的Git配置"
@@ -290,7 +275,6 @@ onMounted(() => {
       </div>
     </el-card>
 
-    <!-- Git配置表单对话框 -->
     <el-dialog
       v-model="showForm"
       :title="isEdit ? '编辑Git配置' : '新增Git配置'"
@@ -341,7 +325,7 @@ onMounted(() => {
 
 <style scoped>
 .git-config-management {
-  padding: 0 20px;
+  padding: 0;
 }
 
 .card-header {

@@ -10,11 +10,9 @@ import {
   DataAnalysis as DataAnalysisIcon,
   Document as DocumentIcon,
   Monitor as MonitorIcon,
-  FolderOpened as GitIcon,
   UserFilled as UserIcon,
   User as UserManagementIcon,
-  SwitchButton as LogoutIcon,
-  Calendar as CalendarIcon
+  SwitchButton as LogoutIcon
 } from '@element-plus/icons-vue'
 import { useAuthStore } from './stores/authStore'
 
@@ -31,7 +29,6 @@ const handleSelect = (key, keyPath) => {
   console.log(key, keyPath)
 }
 
-// 处理登出
 const handleLogout = async () => {
   try {
     await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
@@ -50,19 +47,14 @@ const handleLogout = async () => {
   }
 }
 
-// 跳转到个人中心
 const goToProfile = () => {
   router.push('/profile')
 }
-
-// 注意：初始化逻辑已移至路由守卫中统一管理
-// 不再需要在 onMounted 中调用 authStore.init()
 </script>
 
 <template>
   <div class="app-container">
     <el-container v-if="isLoggedIn">
-      <!-- 顶部导航栏 -->
       <el-header height="60px" class="header">
         <div class="logo">
           <h1>交换机管理系统</h1>
@@ -90,9 +82,7 @@ const goToProfile = () => {
         </div>
       </el-header>
 
-      <!-- 主体内容 -->
       <el-container>
-        <!-- 侧边栏 -->
         <el-aside width="200px" class="sidebar">
           <el-menu
             :default-active="activeIndex"
@@ -120,25 +110,13 @@ const goToProfile = () => {
               <el-icon><DataAnalysisIcon /></el-icon>
               <span>巡检管理</span>
             </el-menu-item>
-            <el-menu-item index="/configurations">
+            <el-menu-item index="/backup-management">
               <el-icon><DocumentIcon /></el-icon>
-              <span>配置管理</span>
-            </el-menu-item>
-            <el-menu-item index="/backup-schedules">
-              <el-icon><CalendarIcon /></el-icon>
-              <span>备份计划</span>
-            </el-menu-item>
-            <el-menu-item index="/monitoring">
-              <el-icon><DataAnalysisIcon /></el-icon>
-              <span>备份监控</span>
+              <span>备份管理</span>
             </el-menu-item>
             <el-menu-item index="/device-collection">
               <el-icon><MonitorIcon /></el-icon>
               <span>设备采集</span>
-            </el-menu-item>
-            <el-menu-item index="/git-configs">
-              <el-icon><GitIcon /></el-icon>
-              <span>Git配置管理</span>
             </el-menu-item>
             <el-menu-item v-if="isAdmin" index="/users">
               <el-icon><UserManagementIcon /></el-icon>
@@ -147,14 +125,12 @@ const goToProfile = () => {
           </el-menu>
         </el-aside>
 
-        <!-- 内容区域 -->
         <el-main class="main-content">
           <router-view></router-view>
         </el-main>
       </el-container>
     </el-container>
 
-    <!-- 未登录时只显示路由内容（登录页） -->
     <template v-else>
       <router-view></router-view>
     </template>
@@ -225,7 +201,6 @@ const goToProfile = () => {
   min-height: 400px;
 }
 
-/* 自定义滚动条 */
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
