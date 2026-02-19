@@ -5,12 +5,14 @@ import {
   DataBoard, 
   Calendar, 
   Monitor, 
-  FolderOpened 
+  FolderOpened,
+  Document 
 } from '@element-plus/icons-vue'
 import BackupOverview from './backup/BackupOverview.vue'
 import BackupScheduleManagement from './backup/BackupScheduleManagement.vue'
 import BackupMonitoring from './backup/BackupMonitoring.vue'
 import GitConfigManagement from './backup/GitConfigManagement.vue'
+import ConfigList from './backup/ConfigList.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -21,6 +23,7 @@ const tabs = [
   { name: 'overview', label: '概览', icon: DataBoard },
   { name: 'schedules', label: '备份计划', icon: Calendar },
   { name: 'monitoring', label: '备份监控', icon: Monitor },
+  { name: 'configs', label: '配置列表', icon: Document },
   { name: 'git-configs', label: 'Git配置', icon: FolderOpened }
 ]
 
@@ -99,6 +102,16 @@ onMounted(() => {
             </span>
           </template>
           <BackupMonitoring />
+        </el-tab-pane>
+
+        <el-tab-pane name="configs">
+          <template #label>
+            <span class="tab-label">
+              <el-icon><Document /></el-icon>
+              配置列表
+            </span>
+          </template>
+          <ConfigList />
         </el-tab-pane>
 
         <el-tab-pane name="git-configs">

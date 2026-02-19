@@ -45,7 +45,34 @@ const router = createRouter({
       path: '/backup-management',
       name: 'backup-management',
       component: () => import('../views/BackupManagement.vue'),
-      meta: { requiresAuth: true }
+      meta: { requiresAuth: true },
+      children: [
+        {
+          path: '',
+          name: 'backup-overview',
+          component: () => import('../views/BackupManagement.vue')
+        },
+        {
+          path: 'schedules',
+          name: 'backup-schedules-tab',
+          component: () => import('../views/BackupManagement.vue')
+        },
+        {
+          path: 'monitoring',
+          name: 'backup-monitoring-tab',
+          component: () => import('../views/BackupManagement.vue')
+        },
+        {
+          path: 'configs',
+          name: 'backup-configs-tab',
+          component: () => import('../views/BackupManagement.vue')
+        },
+        {
+          path: 'git-configs',
+          name: 'backup-git-configs-tab',
+          component: () => import('../views/BackupManagement.vue')
+        }
+      ]
     },
     {
       path: '/device-collection',
