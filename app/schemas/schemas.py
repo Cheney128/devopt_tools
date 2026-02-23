@@ -265,7 +265,7 @@ class BackupScheduleBase(BaseModel):
     """备份任务基础模型"""
     device_id: int = Field(..., alias="deviceId", description="设备ID")
     schedule_type: str = Field("daily", alias="scheduleType", description="备份类型: hourly, daily, monthly")
-    time: Optional[str] = Field(None, alias="time", description="备份时间点，格式: HH:MM")
+    time: Optional[str] = Field(None, alias="schedule_time", description="备份时间点，格式: HH:MM")
     day: Optional[int] = Field(None, alias="day", description="每月备份日期，1-31")
     is_active: Optional[bool] = Field(True, alias="isActive", description="是否激活")
 

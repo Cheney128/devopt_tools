@@ -4,12 +4,13 @@
 import logging
 from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks, Header, Query
 from sqlalchemy.orm import Session
+from sqlalchemy import func
 from typing import List, Optional, Dict, Any
 from datetime import datetime
 import uuid
 
 from app.models import get_db
-from app.models.models import Configuration, Device, GitConfig, BackupSchedule
+from app.models.models import Configuration, Device, GitConfig, BackupSchedule, BackupExecutionLog
 from app.models.backup_task import BackupTask, BackupTaskStatus
 from app.schemas.schemas import (Configuration as ConfigurationSchema, 
                                  ConfigurationCreate, 
@@ -57,9 +58,45 @@ async def create_backup_schedule(
         db.refresh(db_schedule)
         
         # 立即执行一次备份
-        backup_result = await collect_config_from_device(
-            schedule.device_id, db, netmiko_service, git_service
-        )
+        task_id = str(uuid.uuid4())
+        started_at = datetime.now()
+        
+        try:
+            backup_result = await collect_config_from_device(
+                schedule.device_id, db, netmiko_service, git_service
+            )
+            
+            # 记录执行日志
+            execution_log = BackupExecutionLog(
+                task_id=task_id,
+                device_id=schedule.device_id,
+                schedule_id=db_schedule.id,
+                status="success" if backup_result.get("success") else "failed",
+                trigger_type="manual",
+                error_message=backup_result.get("error"),
+                started_at=started_at,
+                completed_at=datetime.now(),
+                config_id=backup_result.get("config_id")
+            )
+            db.add(execution_log)
+            db.commit()
+            
+        except Exception as backup_error:
+            # 备份执行失败，记录失败日志
+            logger.error(f"创建备份计划时立即备份失败: {str(backup_error)}")
+            execution_log = BackupExecutionLog(
+                task_id=task_id,
+                device_id=schedule.device_id,
+                schedule_id=db_schedule.id,
+                status="failed",
+                trigger_type="manual",
+                error_message=str(backup_error),
+                started_at=started_at,
+                completed_at=datetime.now()
+            )
+            db.add(execution_log)
+            db.commit()
+            backup_result = {"success": False, "error": str(backup_error)}
         
         # 备份完成后，将任务添加到调度器
         if db_schedule.is_active:
@@ -107,6 +144,17 @@ def get_backup_schedules(
                    .limit(page_size) \
                    .all()
     
+    # 批量查询每个计划的最后执行时间
+    schedule_ids = [schedule.id for schedule, _ in results]
+    last_executions = db.query(
+        BackupExecutionLog.schedule_id,
+        func.max(BackupExecutionLog.completed_at).label('last_run')
+    ).filter(
+        BackupExecutionLog.schedule_id.in_(schedule_ids)
+    ).group_by(BackupExecutionLog.schedule_id).all()
+    
+    last_run_dict = {se.schedule_id: se.last_run for se in last_executions}
+    
     # 转换为备份任务模式列表
     schedules = []
     for schedule, device_name in results:
@@ -118,7 +166,7 @@ def get_backup_schedules(
             'schedule_time': schedule.time,
             'schedule_day': schedule.day,
             'is_active': schedule.is_active,
-            'last_run_time': None,
+            'last_run_time': last_run_dict.get(schedule.id),
             'created_at': schedule.created_at,
             'updated_at': schedule.updated_at
         }
@@ -150,6 +198,14 @@ def get_backup_schedule(
         )
     
     schedule, device_name = result
+    
+    # 查询该计划的最后执行时间
+    last_execution = db.query(
+        func.max(BackupExecutionLog.completed_at).label('last_run')
+    ).filter(
+        BackupExecutionLog.schedule_id == schedule_id
+    ).scalar()
+    
     schedule_dict = {
         'id': schedule.id,
         'device_id': schedule.device_id,
@@ -158,7 +214,7 @@ def get_backup_schedule(
         'schedule_time': schedule.time,
         'schedule_day': schedule.day,
         'is_active': schedule.is_active,
-        'last_run_time': None,
+        'last_run_time': last_execution,
         'created_at': schedule.created_at,
         'updated_at': schedule.updated_at
     }

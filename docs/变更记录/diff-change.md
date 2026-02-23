@@ -229,7 +229,7 @@
     - 更新需求概述（添加配置列表）
     - 更新备份管理页面布局（添加配置列表Tab）
     - 更新Tab页签设计（添加配置列表页签）
-    - 添加配置列表子页面设计说明
+    - 新增4.6配置列表子页面设计说明
     - 更新路由设计（添加configs子路由）
     - 更新URL与Tab对应关系
     - 更新组件结构设计（添加ConfigList.vue）
@@ -295,5 +295,44 @@
     - **根因**：backup_now 函数没有记录执行日志到 backup_execution_logs 表，也没有关联 schedule_id
   - **问题3**：调度器执行备份时出现错误
     - **根因**：尝试更新不存在的 schedule.last_run_time 字段
+
+---
+
+## 变更 14：备份计划第一阶段快速修复
+
+- **变更的日期**：2026-02-23 09:00
+- **变更的文件**：
+  - `app/schemas/schemas.py`
+  - `app/api/endpoints/configurations.py`
+- **变更的位置**：
+  - schemas.py：BackupScheduleBase 类的 time 字段 alias 配置
+  - configurations.py：create_backup_schedule、get_backup_schedules、get_backup_schedule 函数
+- **变更的内容**：
+  1. 修改 schemas.py 中的 BackupScheduleBase 类：
+     - 将 time 字段的 alias 从 "time" 改为 "schedule_time"
+     - 使后端能正确接收前端发送的 schedule_time 字段
+  2. 修改 configurations.py 中的 get_backup_schedules 函数：
+     - 添加 sqlalchemy.func 导入
+     - 添加 BackupExecutionLog 模型导入
+     - 批量查询每个计划的最后执行时间
+     - 从 backup_execution_logs 表查询 completed_at 字段
+     - 使用字典映射 schedule_id 到 last_run_time
+  3. 修改 configurations.py 中的 get_backup_schedule 函数：
+     - 添加对单个计划的最后执行时间查询
+     - 使用 func.max(BackupExecutionLog.completed_at) 查询
+  4. 修改 configurations.py 中的 create_backup_schedule 函数：
+     - 在立即执行备份时生成 task_id 和 started_at
+     - 添加 try-except 包裹备份执行逻辑
+     - 备份成功后记录执行日志到 backup_execution_logs 表
+     - 备份失败时也记录失败日志
+     - 设置 trigger_type 为 "manual"
+     - 关联 schedule_id
+- **变更的原因**：
+  - **问题1**：时间字段显示"未设置"
+    - **根因**：前端发送 schedule_time，后端 Schema 配置的 alias 是 "time"，导致字段无法正确映射
+  - **问题2**：上次执行时间显示"从未执行"
+    - **根因**：后端 API 硬编码 last_run_time 为 None，没有从执行日志表查询
+  - **问题3**：创建备份计划时立即执行的备份没有记录执行日志
+    - **根因**：create_backup_schedule 函数没有记录执行日志到 backup_execution_logs 表
 
 ---
