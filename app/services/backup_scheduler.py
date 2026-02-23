@@ -197,11 +197,6 @@ class BackupSchedulerService:
                 completed_at=datetime.now()
             )
             db.add(execution_log)
-            
-            # 更新备份计划的最后执行时间
-            if schedule:
-                schedule.last_run_time = datetime.now()
-            
             db.commit()
             logger.info(f"Backup completed successfully for device {device_id}, task_id: {task_id}")
             

@@ -260,3 +260,40 @@
 - **变更的原因**：代码完成配置管理页面丢失问题修复后，需要同步更新项目分析文档，保持文档与代码的一致性，添加历史记录的修订，在文档中观测到项目演化的记录
 
 ---
+
+## 变更 13：修复备份计划"上次执行"显示问题
+
+- **变更的日期**：2026-02-20
+- **变更的文件**：
+  - `app/api/endpoints/configurations.py`
+  - `app/services/backup_scheduler.py`
+  - `docs/功能需求/前端/备份管理/备份计划/备份计划前端显示从未执行问题分析.md`
+- **变更的位置**：
+  - configurations.py：get_backup_schedules、get_backup_schedule、backup_now 函数
+  - backup_scheduler.py：_execute_backup 函数
+- **变更的内容**：
+  1. 修改 get_backup_schedules 函数：
+     - 添加 BackupExecutionLog 和 func 导入
+     - 批量查询每个备份计划的最后执行时间（从 backup_execution_logs 表）
+     - 填充 last_run_time 字段而不是硬编码为 None
+  2. 修改 get_backup_schedule 函数：
+     - 添加对单个计划的最后执行时间查询
+  3. 修复 backup_now 函数：
+     - 添加完整的执行日志记录
+     - 生成唯一 task_id
+     - 查找设备对应的备份计划
+     - 记录执行开始和结束时间
+     - 记录配置变化信息
+     - 成功和失败都记录到 backup_execution_logs 表
+     - 关联 schedule_id
+  4. 修复 backup_scheduler.py：
+     - 移除对不存在字段 last_run_time 的引用
+- **变更的原因**：
+  - **问题1**：备份计划列表中所有计划的"上次执行"字段都显示"从未执行"
+    - **根因**：后端API返回的 last_run_time 被硬编码为 None
+  - **问题2**：点击"立即备份"后，"上次执行"字段不会更新
+    - **根因**：backup_now 函数没有记录执行日志到 backup_execution_logs 表，也没有关联 schedule_id
+  - **问题3**：调度器执行备份时出现错误
+    - **根因**：尝试更新不存在的 schedule.last_run_time 字段
+
+---

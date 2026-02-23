@@ -19,3 +19,39 @@
   4. 修改了 api/index.js，优化 401 处理逻辑
 
 ---
+
+## 决策 2：备份管理模块子路由配置方案
+
+- **决策的日期**：2026-02-15 16:45
+- **决策的背景**：在测试备份管理模块重构功能时，发现直接访问 `/backup-management/git-configs` 等子路径时，Vue Router 报错 "No match found for location"。虽然 BackupManagement.vue 使用 el-tabs 实现了标签页切换，但 Vue Router 没有配置对应的子路由。
+- **决策的内容**：采用"添加子路由配置"方案，为 /backup-management 路由添加 children 子路由配置，使直接访问子路径时能正确渲染 BackupManagement 组件。
+- **决策的原因**：
+  1. 保持 URL 的可访问性，用户可以直接通过 URL 访问特定标签页
+  2. 支持旧 URL 重定向功能（如 /git-configs → /backup-management/git-configs）
+  3. 符合 Vue Router 的最佳实践，子路径应该有对应的路由配置
+  4. 所有子路由指向同一组件，不会增加额外的代码复杂度
+- **决策的结果**：
+  1. 在 router/index.js 中为 /backup-management 添加了 children 子路由配置
+  2. 添加了 4 个子路由：''（概览）、'schedules'（备份计划）、'monitoring'（备份监控）、'git-configs'（Git配置）
+  3. 所有子路由都指向 BackupManagement.vue 组件
+  4. 测试验证所有子路径可以正常访问
+
+---
+
+## 决策 3：测试环境后端服务启动方案
+
+- **决策的日期**：2026-02-15 16:00
+- **决策的背景**：在测试备份管理模块功能时，前端显示 "Server Internal Error" 错误。经分析发现是后端服务未启动导致。尝试启动后端服务时遇到依赖版本冲突问题（fastapi 和 pydantic 版本不兼容）。
+- **决策的内容**：采用"强制重新安装兼容版本"方案，使用 pip install --force-reinstall 安装兼容的 fastapi==0.104.1 和 pydantic==2.5.2 版本。
+- **决策的原因**：
+  1. fastapi 0.128.6 与 pydantic 2.12.5 存在版本不兼容问题
+  2. 强制重新安装可以确保所有依赖版本一致
+  3. fastapi 0.104.1 与 pydantic 2.5.2 经过验证可以正常工作
+  4. 不需要修改代码，只需修复环境依赖
+- **决策的结果**：
+  1. 执行 `pip install fastapi==0.104.1 pydantic==2.5.2 --force-reinstall` 修复依赖
+  2. 成功启动后端服务（uvicorn on port 8000）
+  3. 后端成功加载 210 个备份计划（对应 65 个设备）
+  4. 前端可以正常获取和显示后端数据
+
+---

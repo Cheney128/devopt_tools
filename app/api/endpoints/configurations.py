@@ -31,6 +31,917 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+# ==================== 备份计划相关API（必须放在动态路由之前） ====================
+
+@router.post("/backup-schedules", response_model=Dict[str, Any])
+async def create_backup_schedule(
+    schedule: BackupScheduleCreate,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    创建备份任务
+    """
+    try:
+        # 检查设备是否存在
+        device = db.query(Device).filter(Device.id == schedule.device_id).first()
+        if not device:
+            return {"success": False, "message": "Device not found"}
+        
+        # 创建备份任务
+        db_schedule = BackupSchedule(**schedule.model_dump())
+        db.add(db_schedule)
+        db.commit()
+        db.refresh(db_schedule)
+        
+        # 立即执行一次备份
+        backup_result = await collect_config_from_device(
+            schedule.device_id, db, netmiko_service, git_service
+        )
+        
+        # 备份完成后，将任务添加到调度器
+        if db_schedule.is_active:
+            backup_scheduler.add_schedule(db_schedule, db)
+        
+        # 返回结果，包含备份结果
+        return {
+            "success": True,
+            "message": "Backup schedule created successfully and initial backup completed",
+            "schedule_id": db_schedule.id,
+            "backup_result": backup_result
+        }
+    except Exception as e:
+        print(f"Create backup schedule error: {str(e)}")
+        return {"success": False, "message": f"Failed to create backup schedule: {str(e)}"}
+
+
+@router.get("/backup-schedules", response_model=Dict[str, Any])
+def get_backup_schedules(
+    device_id: Optional[int] = None,
+    is_active: Optional[bool] = None,
+    page: int = Query(1, ge=1, description="页码"),
+    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
+    db: Session = Depends(get_db)
+):
+    """
+    获取备份任务列表
+    """
+    query = db.query(BackupSchedule, Device.hostname.label('device_name')).join(
+        Device, BackupSchedule.device_id == Device.id
+    )
+    
+    if device_id:
+        query = query.filter(BackupSchedule.device_id == device_id)
+    
+    if is_active is not None:
+        query = query.filter(BackupSchedule.is_active == is_active)
+    
+    # 获取总数
+    total = query.count()
+    
+    # 分页查询
+    results = query.order_by(BackupSchedule.created_at.desc()) \
+                   .offset((page - 1) * page_size) \
+                   .limit(page_size) \
+                   .all()
+    
+    # 转换为备份任务模式列表
+    schedules = []
+    for schedule, device_name in results:
+        schedule_dict = {
+            'id': schedule.id,
+            'device_id': schedule.device_id,
+            'device_name': device_name,
+            'schedule_type': schedule.schedule_type,
+            'schedule_time': schedule.time,
+            'schedule_day': schedule.day,
+            'is_active': schedule.is_active,
+            'last_run_time': None,
+            'created_at': schedule.created_at,
+            'updated_at': schedule.updated_at
+        }
+        schedules.append(schedule_dict)
+    
+    # 返回前端期望的格式
+    return {
+        "schedules": schedules,
+        "total": total
+    }
+
+
+@router.get("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
+def get_backup_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    获取单个备份任务详情
+    """
+    result = db.query(BackupSchedule, Device.hostname.label('device_name')).join(
+        Device, BackupSchedule.device_id == Device.id
+    ).filter(BackupSchedule.id == schedule_id).first()
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Backup schedule {schedule_id} not found"
+        )
+    
+    schedule, device_name = result
+    schedule_dict = {
+        'id': schedule.id,
+        'device_id': schedule.device_id,
+        'device_name': device_name,
+        'schedule_type': schedule.schedule_type,
+        'schedule_time': schedule.time,
+        'schedule_day': schedule.day,
+        'is_active': schedule.is_active,
+        'last_run_time': None,
+        'created_at': schedule.created_at,
+        'updated_at': schedule.updated_at
+    }
+    
+    return schedule_dict
+
+
+@router.put("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
+def update_backup_schedule(
+    schedule_id: int,
+    schedule_update: BackupScheduleUpdate,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
+):
+    """
+    更新备份任务
+    """
+    try:
+        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
+        if not db_schedule:
+            return {"success": False, "message": "Backup schedule not found"}
+        
+        # 更新字段
+        update_data = schedule_update.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(db_schedule, field, value)
+        
+        db.commit()
+        db.refresh(db_schedule)
+        
+        # 更新调度器
+        backup_scheduler.update_schedule(db_schedule, db)
+        
+        return {
+            "success": True,
+            "message": "Backup schedule updated successfully"
+        }
+    except Exception as e:
+        print(f"Update backup schedule error: {str(e)}")
+        return {"success": False, "message": f"Failed to update backup schedule: {str(e)}"}
+
+
+@router.delete("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
+def delete_backup_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
+):
+    """
+    删除备份任务
+    """
+    try:
+        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
+        if not db_schedule:
+            return {"success": False, "message": "Backup schedule not found"}
+        
+        # 从调度器中移除
+        backup_scheduler.remove_schedule(schedule_id)
+        
+        db.delete(db_schedule)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Backup schedule deleted successfully"
+        }
+    except Exception as e:
+        print(f"Delete backup schedule error: {str(e)}")
+        return {"success": False, "message": f"Failed to delete backup schedule: {str(e)}"}
+
+
+@router.post("/backup-schedules/batch", response_model=dict)
+async def batch_create_backup_schedules(
+    request: dict,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    批量创建备份任务
+    """
+    import asyncio
+    
+    try:
+        device_ids = request.get("device_ids", [])
+        if not device_ids:
+            return {"success": False, "message": "No device ids provided"}
+        
+        backup_config = {
+            "schedule_type": request.get("schedule_type", "daily"),
+            "time": request.get("time"),
+            "day": request.get("day", 1),
+            "is_active": request.get("is_active", True)
+        }
+        
+        # 先创建所有备份任务记录
+        created_schedules = []
+        invalid_devices = []
+        
+        for device_id in device_ids:
+            try:
+                # 检查设备是否存在
+                device = db.query(Device).filter(Device.id == device_id).first()
+                if not device:
+                    invalid_devices.append(f"Device {device_id}: not found")
+                    continue
+                
+                # 创建备份任务记录
+                db_schedule = BackupSchedule(
+                    device_id=device_id,
+                    schedule_type=backup_config["schedule_type"],
+                    time=backup_config["time"],
+                    day=backup_config["day"],
+                    is_active=backup_config["is_active"]
+                )
+                db.add(db_schedule)
+                db.commit()
+                db.refresh(db_schedule)
+                
+                created_schedules.append(db_schedule)
+            except Exception as e:
+                invalid_devices.append(f"Device {device_id}: {str(e)}")
+        
+        # 并发执行所有设备的备份任务
+        async def backup_device(device_id):
+            try:
+                result = await collect_config_from_device(
+                    device_id, db, netmiko_service, git_service
+                )
+                return {"device_id": device_id, "success": result["success"], "message": result["message"]}
+            except Exception as e:
+                return {"device_id": device_id, "success": False, "message": str(e)}
+        
+        # 使用asyncio.gather并发执行，return_exceptions=True确保单个设备失败不影响整体
+        backup_results = await asyncio.gather(
+            *[backup_device(schedule.device_id) for schedule in created_schedules],
+            return_exceptions=True
+        )
+        
+        # 处理备份结果
+        backup_success_count = 0
+        backup_failed_count = 0
+        backup_failed_devices = []
+        
+        for i, result in enumerate(backup_results):
+            schedule = created_schedules[i]
+            if isinstance(result, Exception):
+                # 处理asyncio.gather返回的异常
+                backup_failed_count += 1
+                backup_failed_devices.append(f"Device {schedule.device_id}: {str(result)}")
+            else:
+                if result["success"]:
+                    backup_success_count += 1
+                else:
+                    backup_failed_count += 1
+                    backup_failed_devices.append(f"Device {result['device_id']}: {result['message']}")
+            
+            # 无论备份成功与否，都将任务添加到调度器
+            if schedule.is_active:
+                backup_scheduler.add_schedule(schedule, db)
+        
+        # 计算整体结果
+        total = len(device_ids)
+        schedule_success_count = len(created_schedules)
+        schedule_failed_count = len(invalid_devices)
+        
+        return {
+            "success": schedule_failed_count == 0,
+            "message": f"Batch create completed: {schedule_success_count} schedules created, {backup_success_count} backups succeeded, {backup_failed_count} backups failed",
+            "total": total,
+            "schedule_success_count": schedule_success_count,
+            "schedule_failed_count": schedule_failed_count,
+            "backup_success_count": backup_success_count,
+            "backup_failed_count": backup_failed_count,
+            "invalid_devices": invalid_devices if invalid_devices else None,
+            "backup_failed_devices": backup_failed_devices if backup_failed_devices else None
+        }
+    except Exception as e:
+        print(f"Batch create backup schedules error: {str(e)}")
+        return {"success": False, "message": f"Failed to create batch backup schedules: {str(e)}"}
+
+
+# ==================== 监控统计API（必须放在动态路由之前） ====================
+
+@router.get("/monitoring/statistics", response_model=Dict[str, Any])
+async def get_backup_statistics(
+    db: Session = Depends(get_db)
+):
+    """获取备份统计信息"""
+    from sqlalchemy import func
+    from app.models.models import BackupExecutionLog, BackupSchedule, Device
+    
+    total_devices = db.query(func.count(Device.id)).scalar() or 0
+    total_schedules = db.query(func.count(BackupSchedule.id)).scalar() or 0
+    active_schedules = db.query(func.count(BackupSchedule.id)).filter(
+        BackupSchedule.is_active == True
+    ).scalar() or 0
+    
+    total_executions = db.query(func.count(BackupExecutionLog.id)).scalar() or 0
+    successful_executions = db.query(func.count(BackupExecutionLog.id)).filter(
+        BackupExecutionLog.status == "success"
+    ).scalar() or 0
+    failed_executions = db.query(func.count(BackupExecutionLog.id)).filter(
+        BackupExecutionLog.status == "failed"
+    ).scalar() or 0
+    
+    success_rate = (successful_executions / total_executions * 100) if total_executions > 0 else 0
+    
+    avg_time = db.query(func.avg(BackupExecutionLog.execution_time)).filter(
+        BackupExecutionLog.execution_time.isnot(None)
+    ).scalar() or 0
+    
+    last_execution = db.query(func.max(BackupExecutionLog.created_at)).scalar()
+    
+    return {
+        "total_devices": total_devices,
+        "total_schedules": total_schedules,
+        "active_schedules": active_schedules,
+        "total_executions": total_executions,
+        "successful_executions": successful_executions,
+        "failed_executions": failed_executions,
+        "success_rate": round(success_rate, 2),
+        "average_execution_time": round(avg_time, 2),
+        "last_execution_time": last_execution
+    }
+
+
+@router.get("/monitoring/dashboard", response_model=Dict[str, Any])
+async def get_dashboard_summary(
+    db: Session = Depends(get_db)
+):
+    """获取仪表盘摘要"""
+    from sqlalchemy import func
+    from app.models.models import BackupExecutionLog, BackupSchedule, Device
+    from datetime import datetime, timedelta
+    
+    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+    
+    stats_response = await get_backup_statistics(db)
+    
+    failed_today = db.query(func.count(BackupExecutionLog.id)).filter(
+        BackupExecutionLog.status == "failed",
+        BackupExecutionLog.created_at >= today_start
+    ).scalar() or 0
+    
+    scheduled_today = db.query(func.count(BackupExecutionLog.id)).filter(
+        BackupExecutionLog.trigger_type == "scheduled",
+        BackupExecutionLog.created_at >= today_start
+    ).scalar() or 0
+    
+    devices_backup_today = db.query(func.count(func.distinct(BackupExecutionLog.device_id))).filter(
+        BackupExecutionLog.created_at >= today_start
+    ).scalar() or 0
+    
+    recent_logs = db.query(BackupExecutionLog).order_by(
+        BackupExecutionLog.created_at.desc()
+    ).limit(10).all()
+    
+    recent_executions = []
+    for log in recent_logs:
+        device = db.query(Device).filter(Device.id == log.device_id).first()
+        recent_executions.append({
+            "id": log.id,
+            "task_id": log.task_id,
+            "device_id": log.device_id,
+            "device_name": device.hostname if device else None,
+            "schedule_id": log.schedule_id,
+            "status": log.status,
+            "execution_time": log.execution_time,
+            "trigger_type": log.trigger_type,
+            "config_id": log.config_id,
+            "error_message": log.error_message,
+            "started_at": log.started_at,
+            "completed_at": log.completed_at,
+            "created_at": log.created_at
+        })
+    
+    return {
+        "statistics": stats_response,
+        "recent_executions": recent_executions,
+        "failed_today": failed_today,
+        "scheduled_today": scheduled_today,
+        "devices_backup_today": devices_backup_today
+    }
+
+
+@router.get("/monitoring/execution-logs", response_model=List[Dict[str, Any]])
+async def get_execution_logs(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    device_id: Optional[int] = Query(None),
+    trigger_type: Optional[str] = Query(None),
+    start_date: Optional[datetime] = Query(None),
+    end_date: Optional[datetime] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """获取执行日志列表"""
+    from app.models.models import BackupExecutionLog, Device
+    from sqlalchemy import func
+    
+    query = db.query(BackupExecutionLog)
+    
+    if status:
+        query = query.filter(BackupExecutionLog.status == status)
+    
+    if device_id:
+        query = query.filter(BackupExecutionLog.device_id == device_id)
+    
+    if trigger_type:
+        query = query.filter(BackupExecutionLog.trigger_type == trigger_type)
+    
+    if start_date:
+        query = query.filter(BackupExecutionLog.created_at >= start_date)
+    
+    if end_date:
+        query = query.filter(BackupExecutionLog.created_at <= end_date)
+    
+    total = query.count()
+    
+    logs = query.order_by(BackupExecutionLog.created_at.desc()).offset(
+        (page - 1) * page_size
+    ).limit(page_size).all()
+    
+    result = []
+    for log in logs:
+        device = db.query(Device).filter(Device.id == log.device_id).first()
+        result.append({
+            "id": log.id,
+            "task_id": log.task_id,
+            "device_id": log.device_id,
+            "device_name": device.hostname if device else None,
+            "schedule_id": log.schedule_id,
+            "status": log.status,
+            "execution_time": log.execution_time,
+            "trigger_type": log.trigger_type,
+            "config_id": log.config_id,
+            "error_message": log.error_message,
+            "error_details": log.error_details,
+            "config_size": log.config_size,
+            "git_commit_id": log.git_commit_id,
+            "started_at": log.started_at,
+            "completed_at": log.completed_at,
+            "created_at": log.created_at
+        })
+    
+    return {
+        "logs": result,
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    }
+
+
+@router.get("/monitoring/trends", response_model=List[Dict[str, Any]])
+async def get_backup_trends(
+    days: int = Query(7, ge=1, le=30),
+    db: Session = Depends(get_db)
+):
+    """获取备份趋势数据"""
+    from sqlalchemy import func
+    from app.models.models import BackupExecutionLog
+    from datetime import datetime, timedelta
+    
+    start_date = datetime.now() - timedelta(days=days)
+    
+    logs = db.query(
+        func.date(BackupExecutionLog.created_at).label('date'),
+        func.count(BackupExecutionLog.id).label('total'),
+        func.sum(func.IF(BackupExecutionLog.status == 'success', 1, 0)).label('success'),
+        func.sum(func.IF(BackupExecutionLog.status == 'failed', 1, 0)).label('failed')
+    ).filter(
+        BackupExecutionLog.created_at >= start_date
+    ).group_by(
+        func.date(BackupExecutionLog.created_at)
+    ).order_by('date').all()
+    
+    result = []
+    for log in logs:
+        total = log.total or 0
+        success = log.success or 0
+        success_rate = (success / total * 100) if total > 0 else 0
+        result.append({
+            "date": str(log.date),
+            "total": total,
+            "success": success,
+            "failed": log.failed or 0,
+            "success_rate": round(success_rate, 2)
+        })
+    
+    return result
+
+
+@router.get("/monitoring/devices/statistics", response_model=List[Dict[str, Any]])
+async def get_device_backup_statistics(
+    db: Session = Depends(get_db)
+):
+    """获取设备备份统计"""
+    from sqlalchemy import func
+    from app.models.models import BackupExecutionLog, Device
+    
+    devices = db.query(Device).all()
+    result = []
+    
+    for device in devices:
+        stats = db.query(
+            func.count(BackupExecutionLog.id).label('total'),
+            func.sum(func.IF(BackupExecutionLog.status == 'success', 1, 0)).label('success'),
+            func.sum(func.IF(BackupExecutionLog.status == 'failed', 1, 0)).label('failed'),
+            func.max(BackupExecutionLog.created_at).label('last_backup'),
+            func.avg(BackupExecutionLog.execution_time).label('avg_time')
+        ).filter(
+            BackupExecutionLog.device_id == device.id
+        ).first()
+        
+        total = stats.total or 0
+        success = stats.success or 0
+        success_rate = (success / total * 100) if total > 0 else 0
+        
+        result.append({
+            "device_id": device.id,
+            "device_name": device.hostname,
+            "total_backups": total,
+            "successful_backups": success,
+            "failed_backups": stats.failed or 0,
+            "success_rate": round(success_rate, 2),
+            "last_backup_time": stats.last_backup,
+            "average_execution_time": round(stats.avg_time or 0, 2)
+        })
+    
+    return result
+
+
+# ==================== 备份任务相关API（必须放在动态路由之前） ====================
+
+@router.post("/device/{device_id}/backup-now", response_model=Dict[str, Any])
+async def backup_now(
+    device_id: int,
+    db: Session = Depends(get_db),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    立即执行设备备份
+    """
+    import uuid
+    from app.models.models import BackupExecutionLog, BackupSchedule
+    from datetime import datetime
+    
+    task_id = f"manual_{uuid.uuid4().hex[:8]}"
+    started_at = datetime.now()
+    
+    try:
+        # 直接调用现有的collect_config_from_device函数执行备份
+        result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
+        
+        # 计算执行时间
+        execution_time = (datetime.now() - started_at).total_seconds()
+        
+        # 查找对应的备份计划
+        schedule = db.query(BackupSchedule).filter(
+            BackupSchedule.device_id == device_id,
+            BackupSchedule.is_active == True
+        ).first()
+        
+        # 判断配置是否变化
+        config_changed = result.get("config_changed", True)
+        
+        # 构建备注信息
+        error_message = None
+        if not config_changed:
+            error_message = "配置无变化，已成功登录并验证设备配置"
+        
+        # 创建执行日志
+        execution_log = BackupExecutionLog(
+            task_id=task_id,
+            device_id=device_id,
+            schedule_id=schedule.id if schedule else None,
+            status="success" if result.get("success") else "failed",
+            execution_time=execution_time,
+            trigger_type="manual",
+            config_id=result.get("config_id"),
+            config_size=result.get("config_size", 0),
+            git_commit_id=result.get("git_commit_id"),
+            error_message=error_message if not result.get("success") else None,
+            started_at=started_at,
+            completed_at=datetime.now()
+        )
+        db.add(execution_log)
+        db.commit()
+        
+        return result
+    except Exception as e:
+        print(f"Backup now error: {str(e)}")
+        
+        # 查找对应的备份计划
+        schedule = db.query(BackupSchedule).filter(
+            BackupSchedule.device_id == device_id,
+            BackupSchedule.is_active == True
+        ).first()
+        
+        # 创建失败日志
+        execution_log = BackupExecutionLog(
+            task_id=task_id,
+            device_id=device_id,
+            schedule_id=schedule.id if schedule else None,
+            status="failed",
+            execution_time=(datetime.now() - started_at).total_seconds(),
+            trigger_type="manual",
+            error_message=str(e),
+            started_at=started_at,
+            completed_at=datetime.now()
+        )
+        db.add(execution_log)
+        db.commit()
+        
+        return {
+            "success": False,
+            "message": f"Failed to execute backup: {str(e)}"
+        }
+
+
+def get_backup_task_db(task_id: str, db: Session) -> Optional[BackupTask]:
+    """从数据库获取备份任务"""
+    return db.query(BackupTask).filter(BackupTask.task_id == task_id).first()
+
+
+@router.post("/backup-all", response_model=BackupTaskResponse)
+async def backup_all_devices(
+    filter_params: BackupFilter,
+    background_tasks: BackgroundTasks,
+    db: Session = Depends(get_db),
+    idempotency_key: Optional[str] = Header(None)
+):
+    """
+    备份所有设备或符合条件的设备
+    - 异步执行：立即返回任务ID，后台执行备份
+    - 同步执行：等待所有设备备份完成返回结果
+    - 支持并发控制和失败重试
+    - 支持幂等性保护（通过Idempotency-Key请求头）
+    """
+    if idempotency_key:
+        existing_task = db.query(BackupTask).filter(
+            BackupTask.idempotency_key == idempotency_key
+        ).first()
+        if existing_task:
+            return {
+                "task_id": existing_task.task_id,
+                "status": existing_task.status.value if hasattr(existing_task.status, 'value') else existing_task.status,
+                "total": existing_task.total,
+                "completed": existing_task.completed,
+                "success_count": existing_task.success_count,
+                "failed_count": existing_task.failed_count,
+                "message": "重复请求，返回已存在的任务",
+                "progress_percentage": existing_task.progress_percentage if hasattr(existing_task, 'progress_percentage') else 0.0
+            }
+    
+    query = db.query(Device)
+    
+    if filter_params.filter_status:
+        query = query.filter(Device.status == filter_params.filter_status)
+    
+    if filter_params.filter_vendor:
+        query = query.filter(Device.vendor == filter_params.filter_vendor)
+    
+    devices = query.all()
+    total = len(devices)
+    
+    if total == 0:
+        return {
+            "task_id": str(uuid.uuid4()),
+            "status": BackupTaskStatus.COMPLETED.value if hasattr(BackupTaskStatus.COMPLETED, 'value') else BackupTaskStatus.COMPLETED,
+            "total": 0,
+            "completed": 0,
+            "success_count": 0,
+            "failed_count": 0,
+            "message": "没有符合条件的设备",
+            "progress_percentage": 100.0
+        }
+    
+    task = BackupTask(
+        idempotency_key=idempotency_key,
+        total=total,
+        filters={
+            "filter_status": filter_params.filter_status,
+            "filter_vendor": filter_params.filter_vendor
+        },
+        max_concurrent=filter_params.max_concurrent,
+        timeout=filter_params.timeout,
+        retry_count=filter_params.retry_count,
+        notify_on_complete=1 if filter_params.notify_on_complete else 0,
+        priority=filter_params.priority.value if hasattr(filter_params.priority, 'value') else filter_params.priority
+    )
+    db.add(task)
+    db.commit()
+    db.refresh(task)
+    
+    if filter_params.async_execute:
+        background_tasks.add_task(
+            _execute_backup_task_async,
+            task.task_id,
+            [d.id for d in devices],
+            filter_params
+        )
+        
+        return {
+            "task_id": task.task_id,
+            "status": BackupTaskStatus.PENDING.value if hasattr(BackupTaskStatus.PENDING, 'value') else BackupTaskStatus.PENDING,
+            "total": total,
+            "completed": 0,
+            "success_count": 0,
+            "failed_count": 0,
+            "message": f"已启动批量备份任务，共 {total} 个设备",
+            "progress_percentage": 0.0
+        }
+    else:
+        results = await _execute_backup_task_sync(
+            task.task_id,
+            [d.id for d in devices],
+            filter_params,
+            db
+        )
+        
+        return {
+            "task_id": task.task_id,
+            "status": task.status.value if hasattr(task.status, 'value') else task.status,
+            "total": total,
+            "completed": task.completed,
+            "success_count": task.success_count,
+            "failed_count": task.failed_count,
+            "message": f"备份完成，成功 {task.success_count} 个，失败 {task.failed_count} 个",
+            "progress_percentage": task.progress_percentage if hasattr(task, 'progress_percentage') else 0.0
+        }
+
+
+async def _execute_backup_task_async(
+    task_id: str,
+    device_ids: List[int],
+    filter_params: BackupFilter
+):
+    """异步执行备份任务"""
+    from app.database import SessionLocal
+    
+    db = SessionLocal()
+    executor = None
+    try:
+        executor = BackupExecutor(
+            max_concurrent=filter_params.max_concurrent,
+            timeout=filter_params.timeout
+        )
+        await executor.execute_backup_all(
+            task_id=task_id,
+            device_ids=device_ids,
+            db=db,
+            retry_count=filter_params.retry_count
+        )
+    except Exception as e:
+        logger.error(f"备份任务执行失败: {task_id}, 错误: {str(e)}")
+        task = get_backup_task_db(task_id, db)
+        if task:
+            task.status = BackupTaskStatus.FAILED
+            task.error_details = {"error": str(e), "phase": "async_execution"}
+            task.completed_at = datetime.now()
+            db.commit()
+    finally:
+        if executor:
+            await executor.cleanup()
+        db.close()
+
+
+async def _execute_backup_task_sync(
+    task_id: str,
+    device_ids: List[int],
+    filter_params: BackupFilter,
+    db: Session
+):
+    """同步执行备份任务"""
+    executor = BackupExecutor(
+        max_concurrent=filter_params.max_concurrent,
+        timeout=filter_params.timeout
+    )
+    return await executor.execute_backup_all(
+        task_id=task_id,
+        device_ids=device_ids,
+        db=db,
+        retry_count=filter_params.retry_count
+    )
+
+
+@router.get("/backup-tasks", response_model=BackupTaskListResponse)
+async def list_backup_tasks(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    status: Optional[str] = Query(None),
+    db: Session = Depends(get_db)
+):
+    """获取备份任务列表"""
+    query = db.query(BackupTask)
+    
+    if status:
+        query = query.filter(BackupTask.status == status)
+    
+    total = query.count()
+    tasks = query.order_by(BackupTask.created_at.desc()).offset(
+        (page - 1) * page_size
+    ).limit(page_size).all()
+    
+    return {
+        "tasks": [{
+            "task_id": task.task_id,
+            "status": task.status.value if hasattr(task.status, 'value') else task.status,
+            "total": task.total,
+            "completed": task.completed,
+            "success_count": task.success_count,
+            "failed_count": task.failed_count,
+            "message": "",
+            "progress_percentage": 0.0
+        } for task in tasks],
+        "total": total,
+        "page": page,
+        "page_size": page_size
+    }
+
+
+@router.get("/backup-tasks/{task_id}", response_model=Dict[str, Any])
+async def get_backup_task_status(
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """获取备份任务状态和详情"""
+    task = get_backup_task_db(task_id, db)
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    return {
+        "task_id": task.task_id,
+        "status": task.status.value if hasattr(task.status, 'value') else task.status,
+        "total": task.total,
+        "completed": task.completed,
+        "success_count": task.success_count,
+        "failed_count": task.failed_count,
+        "message": "",
+        "filters": task.filters,
+        "created_at": task.created_at,
+        "started_at": task.started_at,
+        "completed_at": task.completed_at,
+        "error_details": task.error_details,
+        "progress_percentage": 0.0
+    }
+
+
+@router.post("/backup-tasks/{task_id}/cancel", response_model=CancelTaskResponse)
+async def cancel_backup_task(
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """取消备份任务"""
+    task = get_backup_task_db(task_id, db)
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    current_status = task.status.value if hasattr(task.status, 'value') else task.status
+    
+    if current_status == BackupTaskStatus.COMPLETED.value if hasattr(BackupTaskStatus.COMPLETED, 'value') else BackupTaskStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="任务已完成，无法取消")
+    
+    if current_status == BackupTaskStatus.CANCELLED.value if hasattr(BackupTaskStatus.CANCELLED, 'value') else BackupTaskStatus.CANCELLED:
+        raise HTTPException(status_code=400, detail="任务已取消")
+    
+    task.status = BackupTaskStatus.CANCELLED
+    task.completed_at = datetime.now()
+    db.commit()
+    
+    backup_executor.cancel_task(task_id)
+    
+    return {"message": "任务已取消", "task_id": task_id}
+
+
+# ==================== 配置管理相关API（动态路由必须放在最后） ====================
+
 @router.get("/", response_model=List[ConfigurationSchema])
 def get_configurations(
     skip: int = 0,
@@ -313,7 +1224,7 @@ async def collect_config_from_device(
             "success": True,
             "message": "Config collected from device and saved",
             "config_id": new_config.id,
-            "version": new_config.version
+            "version": new_version
         }
     except Exception as e:
         print(f"Error in collect_config_from_device: {str(e)}")
@@ -438,841 +1349,3 @@ def commit_config_to_git(
     except Exception as e:
         print(f"Git commit error: {str(e)}")
         return {"success": False, "message": f"Git operation failed: {str(e)}"}
-
-
-@router.post("/backup-schedules", response_model=Dict[str, Any])
-async def create_backup_schedule(
-    schedule: BackupScheduleCreate,
-    db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
-):
-    """
-    创建备份任务
-    """
-    try:
-        # 检查设备是否存在
-        device = db.query(Device).filter(Device.id == schedule.device_id).first()
-        if not device:
-            return {"success": False, "message": "Device not found"}
-        
-        # 创建备份任务
-        db_schedule = BackupSchedule(**schedule.model_dump())
-        db.add(db_schedule)
-        db.commit()
-        db.refresh(db_schedule)
-        
-        # 立即执行一次备份
-        backup_result = await collect_config_from_device(
-            schedule.device_id, db, netmiko_service, git_service
-        )
-        
-        # 备份完成后，将任务添加到调度器
-        if db_schedule.is_active:
-            backup_scheduler.add_schedule(db_schedule, db)
-        
-        # 返回结果，包含备份结果
-        return {
-            "success": True,
-            "message": "Backup schedule created successfully and initial backup completed",
-            "schedule_id": db_schedule.id,
-            "backup_result": backup_result
-        }
-    except Exception as e:
-        print(f"Create backup schedule error: {str(e)}")
-        return {"success": False, "message": f"Failed to create backup schedule: {str(e)}"}
-
-
-@router.get("/backup-schedules", response_model=Dict[str, Any])
-def get_backup_schedules(
-    device_id: Optional[int] = None,
-    is_active: Optional[bool] = None,
-    page: int = Query(1, ge=1, description="页码"),
-    page_size: int = Query(10, ge=1, le=100, description="每页数量"),
-    db: Session = Depends(get_db)
-):
-    """
-    获取备份任务列表
-    """
-    query = db.query(BackupSchedule, Device.hostname.label('device_name')).join(
-        Device, BackupSchedule.device_id == Device.id
-    )
-    
-    if device_id:
-        query = query.filter(BackupSchedule.device_id == device_id)
-    
-    if is_active is not None:
-        query = query.filter(BackupSchedule.is_active == is_active)
-    
-    # 获取总数
-    total = query.count()
-    
-    # 分页查询
-    results = query.order_by(BackupSchedule.created_at.desc()) \
-                   .offset((page - 1) * page_size) \
-                   .limit(page_size) \
-                   .all()
-    
-    # 转换为备份任务模式列表
-    schedules = []
-    for schedule, device_name in results:
-        schedule_dict = {
-            'id': schedule.id,
-            'device_id': schedule.device_id,
-            'device_name': device_name,
-            'schedule_type': schedule.schedule_type,
-            'time': schedule.time,
-            'day': schedule.day,
-            'is_active': schedule.is_active,
-            'created_at': schedule.created_at,
-            'updated_at': schedule.updated_at
-        }
-        schedules.append(BackupScheduleSchema(**schedule_dict))
-    
-    # 返回前端期望的格式
-    return {
-        "schedules": schedules,
-        "total": total
-    }
-
-
-@router.get("/backup-schedules/{schedule_id}", response_model=BackupScheduleSchema)
-def get_backup_schedule(
-    schedule_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    获取单个备份任务详情
-    """
-    result = db.query(BackupSchedule, Device.hostname.label('device_name')).join(
-        Device, BackupSchedule.device_id == Device.id
-    ).filter(BackupSchedule.id == schedule_id).first()
-    
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Backup schedule {schedule_id} not found"
-        )
-    
-    schedule, device_name = result
-    schedule_dict = {
-        'id': schedule.id,
-        'device_id': schedule.device_id,
-        'device_name': device_name,
-        'schedule_type': schedule.schedule_type,
-        'time': schedule.time,
-        'day': schedule.day,
-        'is_active': schedule.is_active,
-        'created_at': schedule.created_at,
-        'updated_at': schedule.updated_at
-    }
-    
-    return BackupScheduleSchema(**schedule_dict)
-
-
-@router.put("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
-def update_backup_schedule(
-    schedule_id: int,
-    schedule_update: BackupScheduleUpdate,
-    db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
-):
-    """
-    更新备份任务
-    """
-    try:
-        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
-        if not db_schedule:
-            return {"success": False, "message": "Backup schedule not found"}
-        
-        # 更新字段
-        update_data = schedule_update.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(db_schedule, field, value)
-        
-        db.commit()
-        db.refresh(db_schedule)
-        
-        # 更新调度器
-        backup_scheduler.update_schedule(db_schedule, db)
-        
-        return {
-            "success": True,
-            "message": "Backup schedule updated successfully"
-        }
-    except Exception as e:
-        print(f"Update backup schedule error: {str(e)}")
-        return {"success": False, "message": f"Failed to update backup schedule: {str(e)}"}
-
-
-@router.delete("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
-def delete_backup_schedule(
-    schedule_id: int,
-    db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
-):
-    """
-    删除备份任务
-    """
-    try:
-        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
-        if not db_schedule:
-            return {"success": False, "message": "Backup schedule not found"}
-        
-        # 从调度器中移除
-        backup_scheduler.remove_schedule(schedule_id)
-        
-        db.delete(db_schedule)
-        db.commit()
-        
-        return {
-            "success": True,
-            "message": "Backup schedule deleted successfully"
-        }
-    except Exception as e:
-        print(f"Delete backup schedule error: {str(e)}")
-        return {"success": False, "message": f"Failed to delete backup schedule: {str(e)}"}
-
-
-@router.post("/backup-schedules/batch", response_model=dict)
-async def batch_create_backup_schedules(
-    request: dict,
-    db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
-):
-    """
-    批量创建备份任务
-    """
-    import asyncio
-    
-    try:
-        device_ids = request.get("device_ids", [])
-        if not device_ids:
-            return {"success": False, "message": "No device ids provided"}
-        
-        backup_config = {
-            "schedule_type": request.get("schedule_type", "daily"),
-            "time": request.get("time"),
-            "day": request.get("day", 1),
-            "is_active": request.get("is_active", True)
-        }
-        
-        # 先创建所有备份任务记录
-        created_schedules = []
-        invalid_devices = []
-        
-        for device_id in device_ids:
-            try:
-                # 检查设备是否存在
-                device = db.query(Device).filter(Device.id == device_id).first()
-                if not device:
-                    invalid_devices.append(f"Device {device_id}: not found")
-                    continue
-                
-                # 创建备份任务记录
-                db_schedule = BackupSchedule(
-                    device_id=device_id,
-                    schedule_type=backup_config["schedule_type"],
-                    time=backup_config["time"],
-                    day=backup_config["day"],
-                    is_active=backup_config["is_active"]
-                )
-                db.add(db_schedule)
-                db.commit()
-                db.refresh(db_schedule)
-                
-                created_schedules.append(db_schedule)
-            except Exception as e:
-                invalid_devices.append(f"Device {device_id}: {str(e)}")
-        
-        # 并发执行所有设备的备份任务
-        async def backup_device(device_id):
-            try:
-                result = await collect_config_from_device(
-                    device_id, db, netmiko_service, git_service
-                )
-                return {"device_id": device_id, "success": result["success"], "message": result["message"]}
-            except Exception as e:
-                return {"device_id": device_id, "success": False, "message": str(e)}
-        
-        # 使用asyncio.gather并发执行，return_exceptions=True确保单个设备失败不影响整体
-        backup_results = await asyncio.gather(
-            *[backup_device(schedule.device_id) for schedule in created_schedules],
-            return_exceptions=True
-        )
-        
-        # 处理备份结果
-        backup_success_count = 0
-        backup_failed_count = 0
-        backup_failed_devices = []
-        
-        for i, result in enumerate(backup_results):
-            schedule = created_schedules[i]
-            if isinstance(result, Exception):
-                # 处理asyncio.gather返回的异常
-                backup_failed_count += 1
-                backup_failed_devices.append(f"Device {schedule.device_id}: {str(result)}")
-            else:
-                if result["success"]:
-                    backup_success_count += 1
-                else:
-                    backup_failed_count += 1
-                    backup_failed_devices.append(f"Device {result['device_id']}: {result['message']}")
-            
-            # 无论备份成功与否，都将任务添加到调度器
-            if schedule.is_active:
-                backup_scheduler.add_schedule(schedule, db)
-        
-        # 计算整体结果
-        total = len(device_ids)
-        schedule_success_count = len(created_schedules)
-        schedule_failed_count = len(invalid_devices)
-        
-        return {
-            "success": schedule_failed_count == 0,
-            "message": f"Batch create completed: {schedule_success_count} schedules created, {backup_success_count} backups succeeded, {backup_failed_count} backups failed",
-            "total": total,
-            "schedule_success_count": schedule_success_count,
-            "schedule_failed_count": schedule_failed_count,
-            "backup_success_count": backup_success_count,
-            "backup_failed_count": backup_failed_count,
-            "invalid_devices": invalid_devices if invalid_devices else None,
-            "backup_failed_devices": backup_failed_devices if backup_failed_devices else None
-        }
-    except Exception as e:
-        print(f"Batch create backup schedules error: {str(e)}")
-        return {"success": False, "message": f"Failed to create batch backup schedules: {str(e)}"}
-
-
-@router.post("/device/{device_id}/backup-now", response_model=Dict[str, Any])
-async def backup_now(
-    device_id: int,
-    db: Session = Depends(get_db),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
-):
-    """
-    立即执行设备备份
-    """
-    try:
-        # 直接调用现有的collect_config_from_device函数执行备份
-        result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
-        return result
-    except Exception as e:
-        print(f"Backup now error: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Failed to execute backup: {str(e)}"
-        }
-
-
-def get_backup_task_db(task_id: str, db: Session) -> Optional[BackupTask]:
-    """从数据库获取备份任务"""
-    return db.query(BackupTask).filter(BackupTask.task_id == task_id).first()
-
-
-@router.post("/backup-all", response_model=BackupTaskResponse)
-async def backup_all_devices(
-    filter_params: BackupFilter,
-    background_tasks: BackgroundTasks,
-    db: Session = Depends(get_db),
-    idempotency_key: Optional[str] = Header(None)
-):
-    """
-    备份所有设备或符合条件的设备
-    - 异步执行：立即返回任务ID，后台执行备份
-    - 同步执行：等待所有设备备份完成返回结果
-    - 支持并发控制和失败重试
-    - 支持幂等性保护（通过Idempotency-Key请求头）
-    """
-    if idempotency_key:
-        existing_task = db.query(BackupTask).filter(
-            BackupTask.idempotency_key == idempotency_key
-        ).first()
-        if existing_task:
-            return {
-                "task_id": existing_task.task_id,
-                "status": existing_task.status.value if hasattr(existing_task.status, 'value') else existing_task.status,
-                "total": existing_task.total,
-                "completed": existing_task.completed,
-                "success_count": existing_task.success_count,
-                "failed_count": existing_task.failed_count,
-                "message": "重复请求，返回已存在的任务",
-                "progress_percentage": existing_task.progress_percentage if hasattr(existing_task, 'progress_percentage') else 0.0
-            }
-    
-    query = db.query(Device)
-    
-    if filter_params.filter_status:
-        query = query.filter(Device.status == filter_params.filter_status)
-    
-    if filter_params.filter_vendor:
-        query = query.filter(Device.vendor == filter_params.filter_vendor)
-    
-    devices = query.all()
-    total = len(devices)
-    
-    if total == 0:
-        return {
-            "task_id": str(uuid.uuid4()),
-            "status": BackupTaskStatus.COMPLETED.value if hasattr(BackupTaskStatus.COMPLETED, 'value') else BackupTaskStatus.COMPLETED,
-            "total": 0,
-            "completed": 0,
-            "success_count": 0,
-            "failed_count": 0,
-            "message": "没有符合条件的设备",
-            "progress_percentage": 100.0
-        }
-    
-    task = BackupTask(
-        idempotency_key=idempotency_key,
-        total=total,
-        filters={
-            "filter_status": filter_params.filter_status,
-            "filter_vendor": filter_params.filter_vendor
-        },
-        max_concurrent=filter_params.max_concurrent,
-        timeout=filter_params.timeout,
-        retry_count=filter_params.retry_count,
-        notify_on_complete=1 if filter_params.notify_on_complete else 0,
-        priority=filter_params.priority.value if hasattr(filter_params.priority, 'value') else filter_params.priority
-    )
-    db.add(task)
-    db.commit()
-    db.refresh(task)
-    
-    if filter_params.async_execute:
-        background_tasks.add_task(
-            _execute_backup_task_async,
-            task.task_id,
-            [d.id for d in devices],
-            filter_params
-        )
-        
-        return {
-            "task_id": task.task_id,
-            "status": BackupTaskStatus.PENDING.value if hasattr(BackupTaskStatus.PENDING, 'value') else BackupTaskStatus.PENDING,
-            "total": total,
-            "completed": 0,
-            "success_count": 0,
-            "failed_count": 0,
-            "message": f"已启动批量备份任务，共 {total} 个设备",
-            "progress_percentage": 0.0
-        }
-    else:
-        results = await _execute_backup_task_sync(
-            task.task_id,
-            [d.id for d in devices],
-            filter_params,
-            db
-        )
-        
-        return {
-            "task_id": task.task_id,
-            "status": task.status.value if hasattr(task.status, 'value') else task.status,
-            "total": total,
-            "completed": task.completed,
-            "success_count": task.success_count,
-            "failed_count": task.failed_count,
-            "message": f"备份完成，成功 {task.success_count} 个，失败 {task.failed_count} 个",
-            "progress_percentage": task.progress_percentage if hasattr(task, 'progress_percentage') else 0.0
-        }
-
-
-async def _execute_backup_task_async(
-    task_id: str,
-    device_ids: List[int],
-    filter_params: BackupFilter
-):
-    """异步执行备份任务"""
-    from app.database import SessionLocal
-    
-    db = SessionLocal()
-    executor = None
-    try:
-        executor = BackupExecutor(
-            max_concurrent=filter_params.max_concurrent,
-            timeout=filter_params.timeout
-        )
-        await executor.execute_backup_all(
-            task_id=task_id,
-            device_ids=device_ids,
-            db=db,
-            retry_count=filter_params.retry_count
-        )
-    except Exception as e:
-        logger.error(f"备份任务执行失败: {task_id}, 错误: {str(e)}")
-        task = get_backup_task_db(task_id, db)
-        if task:
-            task.status = BackupTaskStatus.FAILED
-            task.error_details = {"error": str(e), "phase": "async_execution"}
-            task.completed_at = datetime.now()
-            db.commit()
-    finally:
-        if executor:
-            await executor.cleanup()
-        db.close()
-
-
-async def _execute_backup_task_sync(
-    task_id: str,
-    device_ids: List[int],
-    filter_params: BackupFilter,
-    db: Session
-):
-    """同步执行备份任务"""
-    executor = BackupExecutor(
-        max_concurrent=filter_params.max_concurrent,
-        timeout=filter_params.timeout
-    )
-    return await executor.execute_backup_all(
-        task_id=task_id,
-        device_ids=device_ids,
-        db=db,
-        retry_count=filter_params.retry_count
-    )
-
-
-@router.get("/backup-tasks", response_model=BackupTaskListResponse)
-async def list_backup_tasks(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    status: Optional[str] = Query(None),
-    db: Session = Depends(get_db)
-):
-    """获取备份任务列表"""
-    query = db.query(BackupTask)
-    
-    if status:
-        query = query.filter(BackupTask.status == status)
-    
-    total = query.count()
-    tasks = query.order_by(BackupTask.created_at.desc()).offset(
-        (page - 1) * page_size
-    ).limit(page_size).all()
-    
-    return {
-        "tasks": [{
-            "task_id": task.task_id,
-            "status": task.status.value if hasattr(task.status, 'value') else task.status,
-            "total": task.total,
-            "completed": task.completed,
-            "success_count": task.success_count,
-            "failed_count": task.failed_count,
-            "message": "",
-            "progress_percentage": 0.0
-        } for task in tasks],
-        "total": total,
-        "page": page,
-        "page_size": page_size
-    }
-
-
-@router.get("/backup-tasks/{task_id}", response_model=Dict[str, Any])
-async def get_backup_task_status(
-    task_id: str,
-    db: Session = Depends(get_db)
-):
-    """获取备份任务状态和详情"""
-    task = get_backup_task_db(task_id, db)
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    
-    return {
-        "task_id": task.task_id,
-        "status": task.status.value if hasattr(task.status, 'value') else task.status,
-        "total": task.total,
-        "completed": task.completed,
-        "success_count": task.success_count,
-        "failed_count": task.failed_count,
-        "message": "",
-        "filters": task.filters,
-        "created_at": task.created_at,
-        "started_at": task.started_at,
-        "completed_at": task.completed_at,
-        "error_details": task.error_details,
-        "progress_percentage": 0.0
-    }
-
-
-@router.post("/backup-tasks/{task_id}/cancel", response_model=CancelTaskResponse)
-async def cancel_backup_task(
-    task_id: str,
-    db: Session = Depends(get_db)
-):
-    """取消备份任务"""
-    task = get_backup_task_db(task_id, db)
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    
-    current_status = task.status.value if hasattr(task.status, 'value') else task.status
-    
-    if current_status == BackupTaskStatus.COMPLETED.value if hasattr(BackupTaskStatus.COMPLETED, 'value') else BackupTaskStatus.COMPLETED:
-        raise HTTPException(status_code=400, detail="任务已完成，无法取消")
-    
-    if current_status == BackupTaskStatus.CANCELLED.value if hasattr(BackupTaskStatus.CANCELLED, 'value') else BackupTaskStatus.CANCELLED:
-        raise HTTPException(status_code=400, detail="任务已取消")
-    
-    task.status = BackupTaskStatus.CANCELLED
-    task.completed_at = datetime.now()
-    db.commit()
-    
-    backup_executor.cancel_task(task_id)
-    
-    return {"message": "任务已取消", "task_id": task_id}
-
-
-# ==================== 监控统计API ====================
-
-@router.get("/monitoring/statistics", response_model=Dict[str, Any])
-async def get_backup_statistics(
-    db: Session = Depends(get_db)
-):
-    """获取备份统计信息"""
-    from sqlalchemy import func
-    from app.models.models import BackupExecutionLog, BackupSchedule, Device
-    
-    total_devices = db.query(func.count(Device.id)).scalar() or 0
-    total_schedules = db.query(func.count(BackupSchedule.id)).scalar() or 0
-    active_schedules = db.query(func.count(BackupSchedule.id)).filter(
-        BackupSchedule.is_active == True
-    ).scalar() or 0
-    
-    total_executions = db.query(func.count(BackupExecutionLog.id)).scalar() or 0
-    successful_executions = db.query(func.count(BackupExecutionLog.id)).filter(
-        BackupExecutionLog.status == "success"
-    ).scalar() or 0
-    failed_executions = db.query(func.count(BackupExecutionLog.id)).filter(
-        BackupExecutionLog.status == "failed"
-    ).scalar() or 0
-    
-    success_rate = (successful_executions / total_executions * 100) if total_executions > 0 else 0
-    
-    avg_time = db.query(func.avg(BackupExecutionLog.execution_time)).filter(
-        BackupExecutionLog.execution_time.isnot(None)
-    ).scalar() or 0
-    
-    last_execution = db.query(func.max(BackupExecutionLog.created_at)).scalar()
-    
-    return {
-        "total_devices": total_devices,
-        "total_schedules": total_schedules,
-        "active_schedules": active_schedules,
-        "total_executions": total_executions,
-        "successful_executions": successful_executions,
-        "failed_executions": failed_executions,
-        "success_rate": round(success_rate, 2),
-        "average_execution_time": round(avg_time, 2),
-        "last_execution_time": last_execution
-    }
-
-
-@router.get("/monitoring/dashboard", response_model=Dict[str, Any])
-async def get_dashboard_summary(
-    db: Session = Depends(get_db)
-):
-    """获取仪表盘摘要"""
-    from sqlalchemy import func
-    from app.models.models import BackupExecutionLog, BackupSchedule, Device
-    from datetime import datetime, timedelta
-    
-    today_start = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-    
-    stats_response = await get_backup_statistics(db)
-    
-    failed_today = db.query(func.count(BackupExecutionLog.id)).filter(
-        BackupExecutionLog.status == "failed",
-        BackupExecutionLog.created_at >= today_start
-    ).scalar() or 0
-    
-    scheduled_today = db.query(func.count(BackupExecutionLog.id)).filter(
-        BackupExecutionLog.trigger_type == "scheduled",
-        BackupExecutionLog.created_at >= today_start
-    ).scalar() or 0
-    
-    devices_backup_today = db.query(func.count(func.distinct(BackupExecutionLog.device_id))).filter(
-        BackupExecutionLog.created_at >= today_start
-    ).scalar() or 0
-    
-    recent_logs = db.query(BackupExecutionLog).order_by(
-        BackupExecutionLog.created_at.desc()
-    ).limit(10).all()
-    
-    recent_executions = []
-    for log in recent_logs:
-        device = db.query(Device).filter(Device.id == log.device_id).first()
-        recent_executions.append({
-            "id": log.id,
-            "task_id": log.task_id,
-            "device_id": log.device_id,
-            "device_name": device.hostname if device else None,
-            "schedule_id": log.schedule_id,
-            "status": log.status,
-            "execution_time": log.execution_time,
-            "trigger_type": log.trigger_type,
-            "config_id": log.config_id,
-            "error_message": log.error_message,
-            "started_at": log.started_at,
-            "completed_at": log.completed_at,
-            "created_at": log.created_at
-        })
-    
-    return {
-        "statistics": stats_response,
-        "recent_executions": recent_executions,
-        "failed_today": failed_today,
-        "scheduled_today": scheduled_today,
-        "devices_backup_today": devices_backup_today
-    }
-
-
-@router.get("/monitoring/execution-logs", response_model=List[Dict[str, Any]])
-async def get_execution_logs(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(20, ge=1, le=100),
-    status: Optional[str] = Query(None),
-    device_id: Optional[int] = Query(None),
-    trigger_type: Optional[str] = Query(None),
-    start_date: Optional[datetime] = Query(None),
-    end_date: Optional[datetime] = Query(None),
-    db: Session = Depends(get_db)
-):
-    """获取执行日志列表"""
-    from app.models.models import BackupExecutionLog, Device
-    from sqlalchemy import func
-    
-    query = db.query(BackupExecutionLog)
-    
-    if status:
-        query = query.filter(BackupExecutionLog.status == status)
-    
-    if device_id:
-        query = query.filter(BackupExecutionLog.device_id == device_id)
-    
-    if trigger_type:
-        query = query.filter(BackupExecutionLog.trigger_type == trigger_type)
-    
-    if start_date:
-        query = query.filter(BackupExecutionLog.created_at >= start_date)
-    
-    if end_date:
-        query = query.filter(BackupExecutionLog.created_at <= end_date)
-    
-    total = query.count()
-    
-    logs = query.order_by(BackupExecutionLog.created_at.desc()).offset(
-        (page - 1) * page_size
-    ).limit(page_size).all()
-    
-    result = []
-    for log in logs:
-        device = db.query(Device).filter(Device.id == log.device_id).first()
-        result.append({
-            "id": log.id,
-            "task_id": log.task_id,
-            "device_id": log.device_id,
-            "device_name": device.hostname if device else None,
-            "schedule_id": log.schedule_id,
-            "status": log.status,
-            "execution_time": log.execution_time,
-            "trigger_type": log.trigger_type,
-            "config_id": log.config_id,
-            "error_message": log.error_message,
-            "error_details": log.error_details,
-            "config_size": log.config_size,
-            "git_commit_id": log.git_commit_id,
-            "started_at": log.started_at,
-            "completed_at": log.completed_at,
-            "created_at": log.created_at
-        })
-    
-    return {
-        "logs": result,
-        "total": total,
-        "page": page,
-        "page_size": page_size
-    }
-
-
-@router.get("/monitoring/trends", response_model=List[Dict[str, Any]])
-async def get_backup_trends(
-    days: int = Query(7, ge=1, le=30),
-    db: Session = Depends(get_db)
-):
-    """获取备份趋势数据"""
-    from sqlalchemy import func
-    from app.models.models import BackupExecutionLog
-    from datetime import datetime, timedelta
-    
-    start_date = datetime.now() - timedelta(days=days)
-    
-    logs = db.query(
-        func.date(BackupExecutionLog.created_at).label('date'),
-        func.count(BackupExecutionLog.id).label('total'),
-        func.sum(func.IF(BackupExecutionLog.status == 'success', 1, 0)).label('success'),
-        func.sum(func.IF(BackupExecutionLog.status == 'failed', 1, 0)).label('failed')
-    ).filter(
-        BackupExecutionLog.created_at >= start_date
-    ).group_by(
-        func.date(BackupExecutionLog.created_at)
-    ).order_by('date').all()
-    
-    result = []
-    for log in logs:
-        total = log.total or 0
-        success = log.success or 0
-        success_rate = (success / total * 100) if total > 0 else 0
-        result.append({
-            "date": str(log.date),
-            "total": total,
-            "success": success,
-            "failed": log.failed or 0,
-            "success_rate": round(success_rate, 2)
-        })
-    
-    return result
-
-
-@router.get("/monitoring/devices/statistics", response_model=List[Dict[str, Any]])
-async def get_device_backup_statistics(
-    db: Session = Depends(get_db)
-):
-    """获取设备备份统计"""
-    from sqlalchemy import func
-    from app.models.models import BackupExecutionLog, Device
-    
-    devices = db.query(Device).all()
-    result = []
-    
-    for device in devices:
-        stats = db.query(
-            func.count(BackupExecutionLog.id).label('total'),
-            func.sum(func.IF(BackupExecutionLog.status == 'success', 1, 0)).label('success'),
-            func.sum(func.IF(BackupExecutionLog.status == 'failed', 1, 0)).label('failed'),
-            func.max(BackupExecutionLog.created_at).label('last_backup'),
-            func.avg(BackupExecutionLog.execution_time).label('avg_time')
-        ).filter(
-            BackupExecutionLog.device_id == device.id
-        ).first()
-        
-        total = stats.total or 0
-        success = stats.success or 0
-        success_rate = (success / total * 100) if total > 0 else 0
-        
-        result.append({
-            "device_id": device.id,
-            "device_name": device.hostname,
-            "total_backups": total,
-            "successful_backups": success,
-            "failed_backups": stats.failed or 0,
-            "success_rate": round(success_rate, 2),
-            "last_backup_time": stats.last_backup,
-            "average_execution_time": round(stats.avg_time or 0, 2)
-        })
-    
-    return result
