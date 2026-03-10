@@ -13,6 +13,10 @@ RUN npm install --registry=https://registry.npmmirror.com
 
 # 复制源代码并构建
 COPY frontend/ ./
+
+# 修复权限问题（Windows上传可能丢失执行权限）
+RUN chmod -R +x node_modules/.bin/ 2>/dev/null || true
+
 RUN npm run build
 
 # ============================================
@@ -49,7 +53,7 @@ WORKDIR /unified-app/app
 
 # 复制并安装Python依赖
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt \
+RUN pip install --no-cache-dir --timeout 600 --retries 5 -r requirements.txt \
     -i https://pypi.tuna.tsinghua.edu.cn/simple
 
 # ============================================

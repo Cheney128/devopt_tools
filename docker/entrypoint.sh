@@ -14,31 +14,31 @@ mkdir -p /var/log/supervisor /var/log/nginx /unified-app/logs
 chown -R www-data:www-data /var/log/nginx
 chown -R root:root /var/log/supervisor
 
-# 打印环境信息（调试用，生产环境可注释）
+# 打印环境信息（调试用，生产环境可注释�?
 echo "[Entrypoint] DEPLOY_MODE: ${DEPLOY_MODE:-not set}"
 echo "[Entrypoint] APP_NAME: ${APP_NAME:-not set}"
 
 # 检查数据库连接（隐藏密码）
 if [ -n "$DATABASE_URL" ]; then
-    masked_url=$(echo "$DATABASE_URL" | sed -E 's/:\/\/[^:]+:[^@]+@/:\/\/***:***@/')
+    masked_url=$(echo "$DATABASE_URL" | sed -E 's|://[^:]+:[^@]+@|://***:***@|')
     echo "[Entrypoint] DATABASE_URL: $masked_url"
 else
     echo "[Entrypoint] WARNING: DATABASE_URL is not set!"
 fi
 
-# 初始化数据库（仅在第一次启动时执行）
+# 初始化数据库（仅在第一次启动时执行�?
 echo "=========================================="
 echo "Initializing Database..."
 echo "=========================================="
 
-# 等待数据库启动
+# 等待数据库启�?
 echo "Waiting for database to be ready..."
 
-# 检查是否已初始化
+# 检查是否已初始�?
 if [ ! -f "/unified-app/.db_initialized" ]; then
     echo "Creating database tables..."
     
-    # 简单的等待和尝试
+    # 简单的等待和尝�?
     max_retries=10
     retry_count=0
     
@@ -46,9 +46,9 @@ if [ ! -f "/unified-app/.db_initialized" ]; then
         echo "Waiting for database... ($retry_count/$max_retries)"
         sleep 3
         
-        # 尝试运行初始化脚本
+        # 尝试运行初始化脚�?
         if python3 /unified-app/scripts/init_auth_data.py; then
-            echo "✓ Database initialization successful!"
+            echo "�?Database initialization successful!"
             # 标记已初始化
             touch /unified-app/.db_initialized
             break
@@ -58,16 +58,16 @@ if [ ! -f "/unified-app/.db_initialized" ]; then
     done
     
     if [ $retry_count -ge $max_retries ]; then
-        echo "✗ Error: Database initialization failed!"
+        echo "�?Error: Database initialization failed!"
         echo "Starting services anyway..."
     else
-        echo "✓ Database initialization completed!"
+        echo "�?Database initialization completed!"
     fi
 else
-    echo "✓ Database already initialized, skipping..."
+    echo "�?Database already initialized, skipping..."
 fi
 
-# 执行数据库迁移（自动检查并执行）
+# 执行数据库迁移（自动检查并执行�?
 echo "=========================================="
 echo "Checking Database Migration..."
 echo "=========================================="
@@ -75,14 +75,14 @@ echo "=========================================="
 python3 /unified-app/scripts/auto_migrate.py
 
 if [ $? -eq 0 ]; then
-    echo "✓ Database migration check completed!"
+    echo "�?Database migration check completed!"
 else
-    echo "⚠ Database migration check failed, but continuing..."
+    echo "�?Database migration check failed, but continuing..."
 fi
 
 echo "=========================================="
 echo "Starting Supervisor..."
 echo "=========================================="
 
-# 执行传入的命令（默认启动supervisord）
+# 执行传入的命令（默认启动supervisord�?
 exec "$@"
