@@ -151,6 +151,7 @@ class BackupSchedule(Base):
     time = Column(String(10), nullable=True)  # 时间点，格式 HH:MM
     day = Column(Integer, nullable=True)  # 每月的日期，1-31
     is_active = Column(Boolean, nullable=False, default=True)
+    last_run_time = Column(DateTime, nullable=True, index=True)  # 上次执行时间
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
     

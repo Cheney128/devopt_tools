@@ -67,6 +67,19 @@ else
     echo "✓ Database already initialized, skipping..."
 fi
 
+# 执行数据库迁移（自动检查并执行）
+echo "=========================================="
+echo "Checking Database Migration..."
+echo "=========================================="
+
+python3 /unified-app/scripts/auto_migrate.py
+
+if [ $? -eq 0 ]; then
+    echo "✓ Database migration check completed!"
+else
+    echo "⚠ Database migration check failed, but continuing..."
+fi
+
 echo "=========================================="
 echo "Starting Supervisor..."
 echo "=========================================="

@@ -79,6 +79,11 @@ async def create_backup_schedule(
                 config_id=backup_result.get("config_id")
             )
             db.add(execution_log)
+            
+            # 更新备份计划的last_run_time
+            if backup_result.get("success"):
+                db_schedule.last_run_time = datetime.now()
+            
             db.commit()
             
         except Exception as backup_error:
@@ -144,18 +149,7 @@ def get_backup_schedules(
                    .limit(page_size) \
                    .all()
     
-    # 批量查询每个计划的最后执行时间
-    schedule_ids = [schedule.id for schedule, _ in results]
-    last_executions = db.query(
-        BackupExecutionLog.schedule_id,
-        func.max(BackupExecutionLog.completed_at).label('last_run')
-    ).filter(
-        BackupExecutionLog.schedule_id.in_(schedule_ids)
-    ).group_by(BackupExecutionLog.schedule_id).all()
-    
-    last_run_dict = {se.schedule_id: se.last_run for se in last_executions}
-    
-    # 转换为备份任务模式列表
+    # 直接从表字段读取last_run_time
     schedules = []
     for schedule, device_name in results:
         schedule_dict = {
@@ -166,7 +160,7 @@ def get_backup_schedules(
             'schedule_time': schedule.time,
             'schedule_day': schedule.day,
             'is_active': schedule.is_active,
-            'last_run_time': last_run_dict.get(schedule.id),
+            'last_run_time': schedule.last_run_time,  # 直接从表字段读取
             'created_at': schedule.created_at,
             'updated_at': schedule.updated_at
         }
@@ -199,13 +193,6 @@ def get_backup_schedule(
     
     schedule, device_name = result
     
-    # 查询该计划的最后执行时间
-    last_execution = db.query(
-        func.max(BackupExecutionLog.completed_at).label('last_run')
-    ).filter(
-        BackupExecutionLog.schedule_id == schedule_id
-    ).scalar()
-    
     schedule_dict = {
         'id': schedule.id,
         'device_id': schedule.device_id,
@@ -214,7 +201,7 @@ def get_backup_schedule(
         'schedule_time': schedule.time,
         'schedule_day': schedule.day,
         'is_active': schedule.is_active,
-        'last_run_time': last_execution,
+        'last_run_time': schedule.last_run_time,  # 直接从表字段读取
         'created_at': schedule.created_at,
         'updated_at': schedule.updated_at
     }
@@ -705,6 +692,11 @@ async def backup_now(
             completed_at=datetime.now()
         )
         db.add(execution_log)
+        
+        # 更新备份计划的last_run_time
+        if schedule and result.get("success"):
+            schedule.last_run_time = datetime.now()
+        
         db.commit()
         
         return result
