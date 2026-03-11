@@ -27,11 +27,7 @@ pwd_context = CryptContext(
 
 
 # JWT 配置
-SECRET_KEY = getattr(settings, 'SECRET_KEY', None)
-if not SECRET_KEY:
-    # 如果没有配置，生成一个随机密钥（仅用于开发环境）
-    # 注意：这会导致后端重启后所有 token 失效
-    SECRET_KEY = secrets.token_urlsafe(32)
+SECRET_KEY = settings.SECRET_KEY
     
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 30  # 默认30分钟
@@ -62,6 +58,8 @@ def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -
     创建 JWT 访问令牌
     """
     to_encode = data.copy()
+    if "sub" in to_encode and to_encode["sub"] is not None:
+        to_encode["sub"] = str(to_encode["sub"])
     if expires_delta:
         expire = datetime.utcnow() + expires_delta
     else:

@@ -21,6 +21,7 @@ gitpython==3.1.43
 # 认证相关依赖
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
+bcrypt==4.0.1
 pillow==10.1.0
 # 其他依赖
 inflection==0.5.1

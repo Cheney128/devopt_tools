@@ -211,3 +211,78 @@ Docker环境前端验证码显示异常的根本原因是**容器中缺少字体
 **分析完成时间**：2026-02-04
 **分析人员**：系统化调试分析
 **状态**：待修复
+
+---
+
+## 2026-03-11 实际问题排查与修复
+
+### 问题现象
+
+Docker部署后，前端登录页面验证码可以正常显示，但使用默认账号密码登录时提示"服务器内部错误"。
+
+### 调试过程
+
+#### 1. 使用 MCP Chrome DevTools 进行前端调试
+
+通过浏览器开发者工具监控网络请求，发现：
+- 验证码API `/api/v1/auth/captcha` 返回 **200 OK** - 验证码功能正常
+- 登录API `/api/v1/auth/login` 返回 **500 Internal Server Error** - 登录失败
+
+#### 2. 后端日志分析
+
+查看容器后端错误日志 `/var/log/supervisor/backend-error.log`：
+
+```
+ValueError: password cannot be longer than 72 bytes, truncate manually if necessary
+AttributeError: module 'bcrypt' has no attribute '__about__'
+```
+
+### 根本原因
+
+**`passlib` 与 `bcrypt` 库版本不兼容**
+
+具体分析：
+1. `requirements.txt` 中指定 `passlib[bcrypt]==1.7.4`
+2. pip 安装时自动安装最新版 `bcrypt` (4.1+)
+3. 新版 `bcrypt` (4.1+) 移除了 `__about__` 属性
+4. `passlib` 在初始化 bcrypt 后端时依赖该属性，导致初始化失败
+5. 密码验证时抛出 `ValueError` 异常
+
+### 解决方案
+
+在 `requirements.txt` 中固定 `bcrypt` 版本：
+
+```diff
+# 认证相关依赖
+python-jose[cryptography]==3.3.0
+passlib[bcrypt]==1.7.4
++bcrypt==4.0.1
+pillow==10.1.0
+```
+
+### 验证结果
+
+修复后重新构建镜像并部署：
+- **镜像版本**: `switch-manage:20260310-10`
+- **登录测试**: ✅ 成功
+- **验证码显示**: ✅ 正常
+- **页面跳转**: ✅ 正常
+
+### 经验总结
+
+1. **依赖版本锁定的重要性**：Python 包的次版本更新可能引入破坏性变更，生产环境应锁定所有依赖版本
+2. **passlib 兼容性问题**：`passlib` 是一个较老的库，与新版 `bcrypt` 存在兼容性问题，建议：
+   - 使用 `bcrypt==4.0.1` 等兼容版本
+   - 或考虑迁移到更现代的密码哈希库如 `argon2`
+3. **Docker 构建缓存**：修改 `requirements.txt` 后需要重新构建 Python 依赖层，Docker 会自动检测变更并重建
+
+### 相关文件变更
+
+| 文件 | 变更内容 |
+|------|----------|
+| `requirements.txt` | 添加 `bcrypt==4.0.1` 版本锁定 |
+
+---
+**修复时间**：2026-03-11
+**修复状态**：已完成
+**验证方式**：MCP Chrome DevTools + 后端日志分析

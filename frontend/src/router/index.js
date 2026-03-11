@@ -112,40 +112,37 @@ const router = createRouter({
 })
 
 router.beforeEach(async (to, from, next) => {
-  // 临时关闭登录验证 - 用于调试
-  return next()
-  
-  // const authStore = useAuthStore()
+  const authStore = useAuthStore()
 
-  // if (!authStore.isInitialized && authStore.token) {
-  //   await authStore.init()
-  // }
+  if (!authStore.isInitialized && authStore.token) {
+    await authStore.init()
+  }
 
-  // const isLoggedIn = authStore.isLoggedIn
+  const isLoggedIn = authStore.isLoggedIn
 
-  // if (to.path === '/login' && isLoggedIn) {
-  //   return next('/')
-  // }
+  if (to.path === '/login' && isLoggedIn) {
+    return next('/')
+  }
 
-  // if (to.meta.public) {
-  //   return next()
-  // }
+  if (to.meta.public) {
+    return next()
+  }
 
-  // if (to.meta.requiresAuth) {
-  //   if (!isLoggedIn) {
-  //     return next({
-  //       path: '/login',
-  //       query: { redirect: to.fullPath }
-  //     })
-  //   }
+  if (to.meta.requiresAuth) {
+    if (!isLoggedIn) {
+      return next({
+        path: '/login',
+        query: { redirect: to.fullPath }
+      })
+    }
 
-  //   if (to.meta.requiresAdmin && !authStore.isAdmin) {
-  //     ElMessage.error('权限不足，无法访问该页面')
-  //     return next('/')
-  //   }
-  // }
+    if (to.meta.requiresAdmin && !authStore.isAdmin) {
+      ElMessage.error('权限不足，无法访问该页面')
+      return next('/')
+    }
+  }
 
-  // next()
+  next()
 })
 
 export default router

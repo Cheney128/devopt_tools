@@ -48,8 +48,8 @@ api.interceptors.response.use(
           // 未登录或 Token 过期
           // 注意：不要在这里清除 token，让调用者（如 authStore.init()）决定如何处理
           // 这样可以避免页面刷新时的竞态条件问题
-          if (config?.url !== '/auth/me') {
-            // 只有非初始化请求才显示错误消息和跳转
+          if (config?.url !== '/auth/me' && config?.url !== '/auth/login') {
+            // 只有非初始化请求和非登录请求才显示错误消息和跳转
             ElMessage.error('登录已过期，请重新登录')
             localStorage.removeItem('token')
             // 使用 window.location 跳转，避免在拦截器中使用 router 导致循环依赖

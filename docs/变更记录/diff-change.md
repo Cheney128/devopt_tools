@@ -336,3 +336,29 @@
     - **根因**：create_backup_schedule 函数没有记录执行日志到 backup_execution_logs 表
 
 ---
+
+## 变更 15：修复登录后鉴权失效与密钥兜底问题
+
+- **变更的日期**：2026-03-11 12:43
+- **变更的文件**：
+  - app/config.py
+  - app/core/security.py
+  - app/api/deps.py
+  - tests/unit/test_auth_secret_key.py
+- **变更的位置**：
+  - config.py：Settings.__init__ 中 SECRET_KEY 初始化
+  - security.py：JWT SECRET_KEY 初始化与 create_access_token
+  - deps.py：get_current_user 中 sub 解析
+  - test_auth_secret_key.py：新增密钥与 subject 回归测试
+- **变更的内容**：
+  1. SECRET_KEY 改为对空字符串和空白值自动回退到默认开发密钥，避免读取到空值
+  2. JWT 模块改为直接使用 settings.SECRET_KEY，不再随机生成运行时密钥
+  3. create_access_token 在签发时将 sub 统一规范为字符串，避免解码校验失败
+  4. get_current_user 对 payload.sub 显式转换为 int，兼容字符串 subject
+  5. 新增 3 个单元测试覆盖空 SECRET_KEY 兜底、稳定密钥解码和 numeric subject 规范化
+- **变更的原因**：
+  - 登录成功后访问 /auth/me 返回 401，根因是 JWT subject 使用数值类型导致解码失败
+  - Build/本地环境存在 SECRET_KEY 为空值风险，会触发不稳定鉴权行为
+  - 需要以可回归测试方式固化修复结果，防止后续回归
+
+---

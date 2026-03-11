@@ -23,6 +23,12 @@ def get_current_user(
     """
     获取当前登录用户
     """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Credentials: {credentials}")
+    
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="未登录或登录已过期",
@@ -30,6 +36,7 @@ def get_current_user(
     )
     
     if not credentials:
+        logger.warning("No credentials found")
         raise credentials_exception
     
     token = credentials.credentials
@@ -38,8 +45,12 @@ def get_current_user(
     if payload is None:
         raise credentials_exception
     
-    user_id: Optional[int] = payload.get("sub")
+    user_id = payload.get("sub")
     if user_id is None:
+        raise credentials_exception
+    try:
+        user_id = int(user_id)
+    except (TypeError, ValueError):
         raise credentials_exception
     
     # 查询用户

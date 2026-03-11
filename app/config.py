@@ -30,7 +30,7 @@ class Settings:
 
         # JWT 密钥配置 - 使用固定密钥，避免后端重启后 token 失效
         # 生产环境应该通过环境变量设置，开发环境使用默认密钥
-        self.SECRET_KEY = os.getenv('SECRET_KEY', 'switch-manage-dev-secret-key-2024-very-long-and-secure')
+        self.SECRET_KEY = (os.getenv('SECRET_KEY') or '').strip() or 'switch-manage-dev-secret-key-2024-very-long-and-secure'
 
         # CORS配置
         self.BACKEND_CORS_ORIGINS = [

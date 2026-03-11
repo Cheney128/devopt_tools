@@ -237,7 +237,48 @@ docker run --rm switch-manage:$VERSION echo "Build successful!"
 
 ---
 
-## 成功构建的最终镜像
+## 验证结果：根本原因确认 ✅
+
+**验证时间**: 2026-03-10
+
+在暂停百度同步盘后，重新执行 SCP 传输和 Docker 构建：
+
+### 文件完整性验证
+
+| 项目 | 本地 | 服务器 | 状态 |
+|------|------|--------|------|
+| 行数 | 88 | 88 | ✅ 一致 |
+| 第15行 | `/var/log/supervisor` | `/var/log/supervisor` | ✅ 完整 |
+| MD5 | `a80bebf6708d09e674f6e5fdec47a5f7` | `a80bebf6708d09e674f6e5fdec47a5f7` | ✅ 一致 |
+
+### Docker 构建验证
+
+```
+镜像: switch-manage:20260310-final
+构建状态: ✅ 成功
+容器启动: ✅ 成功
+entrypoint.sh 执行: ✅ 正常
+sed 命令执行: ✅ 正确（密码被隐藏为 ***:***）
+```
+
+### 结论
+
+**根本原因确认：百度同步盘与 SCP 传输冲突**
+
+暂停百度同步盘后，所有问题均得到解决：
+1. 文件传输完整性 ✅
+2. Docker 构建成功 ✅
+3. 容器正常启动 ✅
+
+### 最终建议
+
+1. **Docker 构建操作时，务必暂停百度同步盘**
+2. 或将项目移出同步盘目录
+3. 传输后验证 MD5 校验和
+
+---
+
+## 成功构建的镜像列表（更新）
 
 | 镜像版本 | 状态 | 备注 |
 |---------|------|------|
@@ -249,14 +290,17 @@ docker run --rm switch-manage:$VERSION echo "Build successful!"
 | switch-manage:20260310-06 | 失败 | entrypoint.sh 截断 |
 | switch-manage:20260310-07 | 失败 | 容器内无 entrypoint.sh |
 | switch-manage:20260310-08 | 失败 | sed 语法错误 |
+| **switch-manage:20260310-final** | **✅ 成功** | **暂停百度同步盘后构建成功** |
 
 ---
 
 ## 待解决问题
 
-1. **entrypoint.sh 文件截断问题**需要进一步排查根本原因
-2. **容器内 entrypoint.sh 文件缺失**需要检查 Dockerfile COPY 命令执行情况
-3. **sed 命令语法**需要使用正确的分隔符
+~~1. **entrypoint.sh 文件截断问题**需要进一步排查根本原因~~ ✅ 已解决
+~~2. **容器内 entrypoint.sh 文件缺失**需要检查 Dockerfile COPY 命令执行情况~~ ✅ 已解决
+~~3. **sed 命令语法**需要使用正确的分隔符~~ ✅ 已解决
+
+**所有问题已解决！**
 
 ---
 
