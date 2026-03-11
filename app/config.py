@@ -35,8 +35,15 @@ class Settings:
         # CORS配置
         self.BACKEND_CORS_ORIGINS = [
             "http://localhost:5173",  # Vite开发服务器
+            "http://localhost:5174",  # Vite开发服务器（备用端口）
             "http://localhost:3000",  # 备用开发端口
         ]
+        
+        # 延迟检测配置
+        self.LATENCY_CHECK_ENABLED = os.getenv('LATENCY_CHECK_ENABLED', 'True').lower() == 'true'
+        self.LATENCY_CHECK_INTERVAL = int(os.getenv('LATENCY_CHECK_INTERVAL', '5'))
+        self.LATENCY_CHECK_TIMEOUT = int(os.getenv('LATENCY_CHECK_TIMEOUT', '5'))
+        self.LATENCY_CHECK_RETRY_COUNT = int(os.getenv('LATENCY_CHECK_RETRY_COUNT', '2'))
 
 
 # 创建全局配置实例

@@ -612,3 +612,121 @@ def batch_import_devices(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=error_msg
         )
+
+
+@router.get("/{device_id}/latency")
+def get_device_latency(device_id: int, db: Session = Depends(get_db)):
+    """
+    获取设备延迟信息
+    """
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device with id {device_id} not found"
+        )
+    
+    return {
+        "device_id": device.id,
+        "hostname": device.hostname,
+        "ip_address": device.ip_address,
+        "latency": device.latency,
+        "last_latency_check": device.last_latency_check.isoformat() if device.last_latency_check else None,
+        "latency_check_enabled": device.latency_check_enabled
+    }
+
+
+@router.post("/{device_id}/check-latency")
+def check_device_latency(device_id: int, db: Session = Depends(get_db)):
+    """
+    手动触发设备延迟检测
+    """
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device with id {device_id} not found"
+        )
+    
+    from app.services.latency_service import latency_service
+    
+    result = latency_service.check_device_latency_sync(device, db)
+    
+    return {
+        "success": True,
+        "message": "延迟检测完成",
+        "data": result
+    }
+
+
+@router.post("/batch/check-latency")
+def batch_check_latency(device_ids: List[int], db: Session = Depends(get_db)):
+    """
+    批量触发设备延迟检测
+    """
+    from app.services.latency_service import latency_service
+    
+    devices = db.query(Device).filter(Device.id.in_(device_ids)).all()
+    
+    if not devices:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No devices found with the given IDs"
+        )
+    
+    results = latency_service.check_devices_batch(devices, db)
+    
+    success_count = sum(1 for r in results if r["success"])
+    failed_count = len(results) - success_count
+    
+    return {
+        "success": True,
+        "message": f"批量延迟检测完成，共检测 {len(results)} 台设备，成功 {success_count} 台，失败 {failed_count} 台",
+        "data": {
+            "total": len(results),
+            "success_count": success_count,
+            "failed_count": failed_count,
+            "results": results
+        }
+    }
+
+
+@router.get("/latency/status")
+def get_latency_status():
+    """
+    获取延迟检测任务状态
+    """
+    from app.services.latency_scheduler import get_latency_scheduler
+    
+    scheduler = get_latency_scheduler()
+    return scheduler.get_status()
+
+
+@router.put("/{device_id}/latency-config")
+def update_latency_config(
+    device_id: int, 
+    enabled: bool = True, 
+    db: Session = Depends(get_db)
+):
+    """
+    更新设备延迟检测配置
+    """
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device with id {device_id} not found"
+        )
+    
+    device.latency_check_enabled = enabled
+    db.commit()
+    db.refresh(device)
+    
+    return {
+        "success": True,
+        "message": f"延迟检测配置已更新为 {'启用' if enabled else '禁用'}",
+        "data": {
+            "device_id": device.id,
+            "latency_check_enabled": device.latency_check_enabled
+        }
+    }

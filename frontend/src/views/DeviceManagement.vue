@@ -259,6 +259,55 @@ const handleTestConnectivity = async (device) => {
   }
 }
 
+// 延迟检测相关函数
+const getLatencyTagType = (latency) => {
+  if (latency === null || latency === undefined) return 'info'
+  if (latency >= 999) return 'danger'
+  if (latency < 50) return 'success'
+  if (latency < 100) return 'success'
+  if (latency < 200) return 'warning'
+  return 'danger'
+}
+
+const formatLatency = (latency) => {
+  if (latency === null || latency === undefined) return '未检测'
+  if (latency >= 999) return '连接失败'
+  return `${latency}ms`
+}
+
+const formatLatencyTime = (time) => {
+  if (!time) return ''
+  const date = new Date(time)
+  const now = new Date()
+  const diff = now - date
+  
+  if (diff < 60000) return '刚刚'
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}分钟前`
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}小时前`
+  return `${Math.floor(diff / 86400000)}天前`
+}
+
+const handleCheckLatency = async (device) => {
+  try {
+    device.checking = true
+    const result = await deviceApi.checkDeviceLatency(device.id)
+    
+    if (result.success) {
+      ElMessage.success(`延迟检测完成: ${formatLatency(result.data.latency)}`)
+      device.latency = result.data.latency
+      device.last_latency_check = result.data.checked_at
+      if (!result.data.success) {
+        device.status = 'offline'
+      }
+      await fetchDevices()
+    }
+  } catch (error) {
+    ElMessage.error('延迟检测失败: ' + (error.message || '未知错误'))
+  } finally {
+    device.checking = false
+  }
+}
+
 // 批量上传相关
 const uploadDialogVisible = ref(false)
 const uploadLoading = ref(false)
@@ -812,11 +861,27 @@ onMounted(() => {
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="350" fixed="right">
+        <el-table-column prop="latency" label="延迟" min-width="100">
+          <template #default="scope">
+            <div class="latency-cell">
+              <el-tag 
+                :type="getLatencyTagType(scope.row.latency)"
+                size="small"
+              >
+                {{ formatLatency(scope.row.latency) }}
+              </el-tag>
+              <div class="latency-time" v-if="scope.row.last_latency_check">
+                {{ formatLatencyTime(scope.row.last_latency_check) }}
+              </div>
+            </div>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="400" fixed="right">
           <template #default="scope">
             <el-button size="small" @click="handleEditDevice(scope.row)">编辑</el-button>
             <el-button size="small" type="danger" @click="handleDeleteDevice(scope.row)">删除</el-button>
             <el-button size="small" type="warning" @click="handleTestConnectivity(scope.row)">连接性测试</el-button>
+            <el-button size="small" type="info" @click="handleCheckLatency(scope.row)" :loading="scope.row.checking">延迟检测</el-button>
             <el-button size="small" type="primary" @click="handleExecuteCommand(scope.row)">命令执行</el-button>
           </template>
         </el-table-column>
@@ -1387,5 +1452,18 @@ onMounted(() => {
   margin-top: 5px;
   color: #909399;
   font-size: 12px;
+}
+
+/* 延迟列样式 */
+.latency-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+}
+
+.latency-time {
+  font-size: 11px;
+  color: #909399;
 }
 </style>

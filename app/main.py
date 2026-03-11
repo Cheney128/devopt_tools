@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api import api_router
 from app.services.backup_scheduler import backup_scheduler
+from app.services.latency_scheduler import init_latency_scheduler
 from app.models import get_db
 
 # 创建FastAPI应用实例
@@ -67,6 +68,18 @@ async def startup_event():
     except Exception as e:
         print(f"Warning: Could not load backup schedules from database: {e}")
         print("Application will continue without backup scheduler functionality.")
+    
+    # 启动延迟检测调度器
+    try:
+        latency_scheduler = init_latency_scheduler(
+            enabled=settings.LATENCY_CHECK_ENABLED,
+            interval_minutes=settings.LATENCY_CHECK_INTERVAL
+        )
+        latency_scheduler.start()
+        print(f"[Startup] Latency scheduler started (enabled={settings.LATENCY_CHECK_ENABLED}, interval={settings.LATENCY_CHECK_INTERVAL}min)")
+    except Exception as e:
+        print(f"Warning: Could not start latency scheduler: {e}")
+        print("Application will continue without latency scheduler functionality.")
 
 
 @app.get("/")

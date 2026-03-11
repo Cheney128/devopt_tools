@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  app:
+    image: 10.21.65.20:5000/switch-manage:20260311-04
+    container_name: switch_manage_unified
+    ports:
+      - "80:80"
+    environment:
+      - DATABASE_URL=mysql+pymysql://root:%5BOylKbYLJf*Hx((4dEIf%5D@db:3306/switch_manage
+      - APP_NAME=Switch Manage System
+      - APP_VERSION=1.0.0
+      - DEBUG=False
+      - DEPLOY_MODE=unified
+    volumes:
+      - app_logs:/unified-app/logs
+      - ./backups:/backups
+    restart: unless-stopped
+    networks:
+      - switch_manage_network
+    mem_limit: 1g
+    cpus: '1.0'
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      db:
+        condition: service_healthy
+
+  db:
+    image: mariadb:11
+    container_name: switch_manage_db
+    environment:
+      - MARIADB_ROOT_PASSWORD=[OylKbYLJf*Hx((4dEIf]
+      - MARIADB_DATABASE=switch_manage
+      - MARIADB_CHARACTER_SET=utf8mb4
+      - MARIADB_COLLATION=utf8mb4_unicode_ci
+      - TZ=Asia/Shanghai
+    volumes:
+      - mysql_data:/var/lib/mysql
+      - ./docker/mysql-init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    restart: unless-stopped
+    networks:
+      - switch_manage_network
+    mem_limit: 512m
+    cpus: '0.5'
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+
+volumes:
+  mysql_data:
+    driver: local
+  app_logs:
+    driver: local
+
+networks:
+  switch_manage_network:
+    driver: bridge

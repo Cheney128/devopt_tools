@@ -146,7 +146,14 @@ export const deviceApi = {
     })
   },
   // 下载设备模板
-  downloadTemplate: () => api.get('/devices/template', { responseType: 'blob' })
+  downloadTemplate: () => api.get('/devices/template', { responseType: 'blob' }),
+  
+  // 延迟检测API
+  getDeviceLatency: (id) => api.get(`/devices/${id}/latency`),
+  checkDeviceLatency: (id) => api.post(`/devices/${id}/check-latency`),
+  batchCheckLatency: (ids) => api.post('/devices/batch/check-latency', ids),
+  getLatencyStatus: () => api.get('/devices/latency/status'),
+  updateLatencyConfig: (id, enabled) => api.put(`/devices/${id}/latency-config`, null, { params: { enabled } })
 }
 
 // 端口API
