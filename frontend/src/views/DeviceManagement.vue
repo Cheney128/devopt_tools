@@ -298,7 +298,7 @@ const handleCheckLatency = async (device) => {
     if (result.success) {
       ElMessage.success(`延迟检测完成: ${formatLatency(result.data.latency)}`)
       device.latency = result.data.latency
-      device.last_latency_check = result.data.checked_at
+      device.last_latency_check = result.data.last_latency_check
       if (!result.data.success) {
         device.status = 'offline'
       }

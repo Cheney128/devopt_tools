@@ -20,17 +20,8 @@ export const useWebSocketStore = defineStore('websocket', () => {
   
   function getWebSocketUrl() {
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const apiBaseUrl = import.meta.env.VITE_API_BASE_URL || '/api/v1'
-    
-    if (apiBaseUrl.startsWith('http')) {
-      const url = new URL(apiBaseUrl)
-      const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:'
-      return `${wsProtocol}//${url.host}${url.pathname.replace(/^\/api\/v1/, '')}/ws/latency`
-    }
-    
-    const host = window.location.hostname
-    const port = 8000
-    return `${protocol}//${host}:${port}/api/v1/ws/latency`
+    const host = window.location.host
+    return `${protocol}//${host}/api/v1/ws/latency`
   }
   
   function connect(onMessage) {

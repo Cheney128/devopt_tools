@@ -52,6 +52,7 @@ class LatencyService:
         Returns:
             检测结果字典
         """
+        now = datetime.now()
         result = {
             "device_id": device.id,
             "hostname": device.hostname,
@@ -60,7 +61,8 @@ class LatencyService:
             "latency": None,
             "success": False,
             "error": None,
-            "checked_at": datetime.now()
+            "checked_at": now,
+            "last_latency_check": now
         }
         
         try:
