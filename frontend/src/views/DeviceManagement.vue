@@ -1,9 +1,12 @@
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted, onUnmounted, computed } from 'vue'
 import { ElMessage, ElMessageBox, ElUpload, ElButton, ElIcon, ElDialog, ElForm, ElFormItem, ElInput, ElTable, ElTableColumn, ElSelect, ElOption, ElCollapse, ElCollapseItem, ElTag, ElDropdown, ElDropdownMenu, ElDropdownItem, ElScrollbar } from 'element-plus'
 import { Plus, Delete, ArrowDown, Upload, Download, Search } from '@element-plus/icons-vue'
 import { useDeviceStore } from '../stores/deviceStore'
+import { useWebSocketStore } from '../stores/websocketStore'
 import { deviceApi } from '../api/index'
+
+const websocketStore = useWebSocketStore()
 
 // 设备状态选项
 const statusOptions = [
@@ -743,10 +746,31 @@ const executeCommand = async () => {
   }
 }
 
+// 处理WebSocket延迟更新消息
+const handleLatencyUpdate = (data) => {
+  console.log('[DeviceManagement] Received latency update:', data)
+  
+  const deviceIndex = deviceStore.devices.findIndex(d => d.id === data.device_id)
+  if (deviceIndex !== -1) {
+    deviceStore.devices[deviceIndex] = {
+      ...deviceStore.devices[deviceIndex],
+      latency: data.latency,
+      last_latency_check: data.last_latency_check,
+      status: data.status
+    }
+  }
+}
+
 // 生命周期钩子
 onMounted(() => {
   fetchDevices()
   loadCommandHistory()
+  
+  websocketStore.connect(handleLatencyUpdate)
+})
+
+onUnmounted(() => {
+  websocketStore.disconnect()
 })
 </script>
 
@@ -795,6 +819,16 @@ onMounted(() => {
           </div>
         </div>
       </template>
+
+      <!-- WebSocket连接状态 -->
+      <div class="websocket-status">
+        <el-tag 
+          :type="websocketStore.isConnected ? 'success' : 'danger'" 
+          size="small"
+        >
+          {{ websocketStore.isConnected ? '实时更新已连接' : '实时更新未连接' }}
+        </el-tag>
+      </div>
 
       <!-- 搜索表单 -->
       <el-form :inline="true" :model="deviceStore.searchForm" class="search-form" @submit.prevent>
@@ -1465,5 +1499,11 @@ onMounted(() => {
 .latency-time {
   font-size: 11px;
   color: #909399;
+}
+
+.websocket-status {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 10px;
 }
 </style>

@@ -10,6 +10,7 @@ from typing import Optional, Dict, Any, List
 from sqlalchemy.orm import Session
 
 from app.models.models import Device
+from app.websocket import manager
 
 
 class LatencyService:
@@ -130,7 +131,7 @@ class LatencyService:
         success: bool
     ):
         """
-        更新设备延迟和状态
+        更新设备延迟和状态，并广播WebSocket消息
         
         Args:
             db: 数据库会话
@@ -141,12 +142,39 @@ class LatencyService:
         device.latency = latency
         device.last_latency_check = datetime.now()
         
-        if not success:
+        if success:
+            if device.status == "offline":
+                device.status = "active"
+        else:
             if device.status != "maintenance":
                 device.status = "offline"
         
         db.commit()
         db.refresh(device)
+        
+        self._broadcast_latency_update(device, latency)
+    
+    def _broadcast_latency_update(self, device: Device, latency: int):
+        """
+        广播延迟更新到WebSocket客户端
+        
+        Args:
+            device: 设备对象
+            latency: 延迟时间
+        """
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_running():
+                asyncio.create_task(
+                    manager.broadcast_latency_update(
+                        device_id=device.id,
+                        latency=latency,
+                        last_check=device.last_latency_check.isoformat(),
+                        status=device.status
+                    )
+                )
+        except RuntimeError:
+            pass
     
     def check_devices_batch(
         self, 
