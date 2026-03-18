@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   app:
-    image: 10.21.65.20:5000/switch-manage:20260311-04
+    image: 10.21.65.20:5000/switch-manage:20260318-1315
     container_name: switch_manage_unified
     ports:
       - "80:80"
@@ -12,6 +12,7 @@ services:
       - APP_VERSION=1.0.0
       - DEBUG=False
       - DEPLOY_MODE=unified
+      - TZ=Asia/Shanghai
     volumes:
       - app_logs:/unified-app/logs
       - ./backups:/backups
