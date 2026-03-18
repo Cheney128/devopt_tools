@@ -25,6 +25,7 @@ from app.services.netmiko_service import get_netmiko_service, NetmikoService
 from app.services.git_service import get_git_service, GitService
 from app.services.backup_scheduler import get_backup_scheduler, BackupSchedulerService
 from app.services.backup_executor import backup_executor
+from app.services.backup_service import BackupService
 
 logger = logging.getLogger(__name__)
 
@@ -38,9 +39,7 @@ router = APIRouter()
 async def create_backup_schedule(
     schedule: BackupScheduleCreate,
     db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
 ):
     """
     创建备份任务
@@ -63,7 +62,7 @@ async def create_backup_schedule(
         
         try:
             backup_result = await collect_config_from_device(
-                schedule.device_id, db, netmiko_service, git_service
+                schedule.device_id, db
             )
             
             # 记录执行日志
@@ -277,9 +276,7 @@ def delete_backup_schedule(
 async def batch_create_backup_schedules(
     request: dict,
     db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
 ):
     """
     批量创建备份任务
@@ -330,7 +327,7 @@ async def batch_create_backup_schedules(
         async def backup_device(device_id):
             try:
                 result = await collect_config_from_device(
-                    device_id, db, netmiko_service, git_service
+                    device_id, db
                 )
                 return {"device_id": device_id, "success": result["success"], "message": result["message"]}
             except Exception as e:
@@ -641,9 +638,7 @@ async def get_device_backup_statistics(
 @router.post("/device/{device_id}/backup-now", response_model=Dict[str, Any])
 async def backup_now(
     device_id: int,
-    db: Session = Depends(get_db),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
+    db: Session = Depends(get_db)
 ):
     """
     立即执行设备备份
@@ -657,7 +652,7 @@ async def backup_now(
     
     try:
         # 直接调用现有的collect_config_from_device函数执行备份
-        result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
+        result = await collect_config_from_device(device_id, db)
         
         # 计算执行时间
         execution_time = (datetime.now() - started_at).total_seconds()
@@ -1190,96 +1185,13 @@ def batch_delete_configurations(config_ids: List[int], db: Session = Depends(get
 @router.post("/device/{device_id}/collect", response_model=Dict[str, Any])
 async def collect_config_from_device(
     device_id: int,
-    db: Session = Depends(get_db),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
+    db: Session = Depends(get_db)
 ):
     """
     直接从设备获取配置
     """
-    try:
-        # 检查设备是否存在
-        device = db.query(Device).filter(Device.id == device_id).first()
-        if not device:
-            return {"success": False, "message": "Device not found"}
-        
-        # 从设备获取配置
-        config_content = await netmiko_service.collect_running_config(device)
-        if not config_content:
-            return {"success": False, "message": "Failed to get config from device"}
-        
-        # 获取设备最新配置
-        latest_config = db.query(Configuration).filter(
-            Configuration.device_id == device_id
-        ).order_by(Configuration.config_time.desc()).first()
-        
-        # 检查配置是否有变化
-        if latest_config and latest_config.config_content == config_content:
-            return {
-                "success": True,
-                "message": "配置无变化，已成功登录并验证",
-                "config_id": latest_config.id,
-                "config_changed": False,
-                "config_size": len(config_content) if config_content else 0
-            }
-        
-        # 生成版本号
-        new_version = "1.0"
-        if latest_config:
-            # 简单的版本号递增逻辑
-            current_version = latest_config.version
-            try:
-                major, minor = map(int, current_version.split("."))
-                new_version = f"{major}.{minor + 1}"
-            except:
-                new_version = "1.0"
-        
-        # 创建新的配置记录
-        new_config = Configuration(
-            device_id=device_id,
-            config_content=config_content,
-            version=new_version,
-            change_description="Auto-collected from device"
-        )
-        
-        # 检查是否有Git配置，如果有则提交到Git（添加错误处理）
-        try:
-            git_config = db.query(GitConfig).filter(GitConfig.is_active == True).first()
-            if git_config:
-                # 为每个设备创建新的GitService实例，避免单例模式下的资源冲突
-                from app.services.git_service import GitService
-                device_git_service = GitService()
-                if device_git_service.init_repo(git_config):
-                    commit_id = device_git_service.commit_config(
-                        device.hostname,
-                        config_content,
-                        f"Auto-update config for {device.hostname} at {datetime.now()}"
-                    )
-                    if commit_id:
-                        device_git_service.push_to_remote()
-                        new_config.git_commit_id = commit_id
-                    device_git_service.close()
-        except Exception as git_error:
-            print(f"Git operation error: {str(git_error)}")
-            # Git操作失败不影响配置获取，继续执行
-        
-        # 保存到数据库
-        db.add(new_config)
-        db.commit()
-        db.refresh(new_config)
-        
-        return {
-            "success": True,
-            "message": "Config collected from device and saved",
-            "config_id": new_config.id,
-            "version": new_version
-        }
-    except Exception as e:
-        print(f"Error in collect_config_from_device: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Failed to collect config: {str(e)}"
-        }
+    backup_service = BackupService()
+    return await backup_service.collect_config(device_id, db)
 
 
 @router.get("/diff/{config_id1}/{config_id2}", response_model=Dict[str, Any])

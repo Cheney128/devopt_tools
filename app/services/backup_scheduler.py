@@ -1,3 +1,4 @@
+
 """
 备份调度器服务
 负责管理设备配置的自动备份任务
@@ -15,7 +16,6 @@ from app.services.netmiko_service import NetmikoService
 from app.services.git_service import GitService
 from datetime import datetime
 
-# 配置日志
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
@@ -55,10 +55,8 @@ class BackupSchedulerService:
         从数据库加载所有激活的备份任务
         """
         logger.info("Loading backup schedules from database")
-        # 清除现有任务
         self.scheduler.remove_all_jobs()
         
-        # 获取所有激活的备份任务
         schedules = db.query(BackupSchedule).filter(BackupSchedule.is_active == True).all()
         
         for schedule in schedules:
@@ -70,26 +68,23 @@ class BackupSchedulerService:
         """
         添加备份任务到调度器
         """
-        # 获取设备信息
         device = db.query(Device).filter(Device.id == schedule.device_id).first()
         if not device:
             logger.error(f"Device {schedule.device_id} not found for backup schedule {schedule.id}")
             return
         
-        # 根据备份类型创建触发器
         trigger = self._create_trigger(schedule)
         if not trigger:
             logger.error(f"Invalid schedule type {schedule.schedule_type} for backup schedule {schedule.id}")
             return
         
-        # 添加任务到调度器
         self.scheduler.add_job(
             func=self._execute_backup,
             trigger=trigger,
             id=f"backup_{schedule.id}",
             replace_existing=True,
-            args=[schedule.device_id, db],
-            misfire_grace_time=300  # 允许5分钟的错过执行宽限期
+            args=[schedule.device_id],
+            misfire_grace_time=300
         )
         
         logger.info(f"Added backup schedule {schedule.id} for device {device.hostname}")
@@ -98,10 +93,8 @@ class BackupSchedulerService:
         """
         更新调度器中的备份任务
         """
-        # 先移除旧任务
         self.remove_schedule(schedule.id)
         
-        # 如果任务是激活的，添加新任务
         if schedule.is_active:
             self.add_schedule(schedule, db)
     
@@ -119,119 +112,72 @@ class BackupSchedulerService:
         根据备份类型创建Cron触发器
         """
         if schedule.schedule_type == "hourly":
-            # 每小时执行一次
             return CronTrigger(minute="0")
         elif schedule.schedule_type == "daily":
-            # 每天指定时间执行
             if schedule.time:
                 hour, minute = map(int, schedule.time.split(":"))
                 return CronTrigger(hour=hour, minute=minute)
             else:
-                # 默认每天凌晨1点执行
                 return CronTrigger(hour="1", minute="0")
         elif schedule.schedule_type == "monthly":
-            # 每月指定日期和时间执行
             day = schedule.day if schedule.day else 1
             if schedule.time:
                 hour, minute = map(int, schedule.time.split(":"))
                 return CronTrigger(day=day, hour=hour, minute=minute)
             else:
-                # 默认每月1号凌晨1点执行
                 return CronTrigger(day=day, hour="1", minute="0")
         else:
             return None
     
-    async def _execute_backup(self, device_id: int, db: Session):
+    def _execute_backup(self, device_id: int):
         """
-        执行设备配置备份
+        执行设备配置备份（同步函数）
         """
+        import asyncio
+        from app.models import SessionLocal
+        from app.services.backup_service import BackupService
+        
         task_id = f"scheduled_{uuid.uuid4().hex[:8]}"
-        logger.info(f"Executing backup for device {device_id}, task_id: {task_id}")
+        logger.info(f"[ScheduledBackup] Starting backup for device {device_id}, task_id={task_id}")
         
-        started_at = datetime.now()
-        execution_log = None
+        retry_count = 1
+        retry_delay = 5
         
-        try:
-            # 导入需要的服务
-            from app.services.netmiko_service import NetmikoService
-            from app.services.git_service import GitService
-            
-            # 创建服务实例
-            netmiko_service = NetmikoService()
-            git_service = GitService()
-            
-            # 调用现有的配置采集函数
-            from app.api.endpoints.configurations import collect_config_from_device
-            result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
-            
-            # 计算执行时间
-            execution_time = (datetime.now() - started_at).total_seconds()
-            
-            # 查找对应的备份计划
-            schedule = db.query(BackupSchedule).filter(
-                BackupSchedule.device_id == device_id,
-                BackupSchedule.is_active == True
-            ).first()
-            
-            # 判断配置是否变化
-            config_changed = result.get("config_changed", True)
-            
-            # 构建备注信息
-            error_message = None
-            if not config_changed:
-                error_message = "配置无变化，已成功登录并验证设备配置"
-            
-            # 创建执行日志
-            execution_log = BackupExecutionLog(
-                task_id=task_id,
-                device_id=device_id,
-                schedule_id=schedule.id if schedule else None,
-                status="success",
-                execution_time=execution_time,
-                trigger_type="scheduled",
-                config_id=result.get("config_id"),
-                config_size=result.get("config_size", 0),
-                git_commit_id=result.get("git_commit_id"),
-                error_message=error_message,
-                started_at=started_at,
-                completed_at=datetime.now()
-            )
-            db.add(execution_log)
-            
-            # 更新备份计划的last_run_time
-            if schedule:
-                schedule.last_run_time = datetime.now()
-            
-            db.commit()
-            logger.info(f"Backup completed successfully for device {device_id}, task_id: {task_id}")
-            
-        except Exception as e:
-            error_message = str(e)
-            logger.error(f"Backup failed for device {device_id}: {error_message}")
-            
-            # 查找对应的备份计划
-            schedule = db.query(BackupSchedule).filter(
-                BackupSchedule.device_id == device_id,
-                BackupSchedule.is_active == True
-            ).first()
-            
-            # 创建失败日志
-            execution_log = BackupExecutionLog(
-                task_id=task_id,
-                device_id=device_id,
-                schedule_id=schedule.id if schedule else None,
-                status="failed",
-                execution_time=(datetime.now() - started_at).total_seconds(),
-                trigger_type="scheduled",
-                error_message=error_message,
-                started_at=started_at,
-                completed_at=datetime.now()
-            )
-            db.add(execution_log)
-            db.commit()
+        for attempt in range(retry_count + 1):
+            db = None
+            try:
+                logger.info(f"[ScheduledBackup] Creating database session... (attempt {attempt + 1}/{retry_count + 1})")
+                db = SessionLocal()
+                
+                backup_service = BackupService()
+                
+                logger.info(f"[ScheduledBackup] Calling BackupService.execute_scheduled_backup()...")
+                result = asyncio.run(
+                    backup_service.execute_scheduled_backup(device_id, db, task_id)
+                )
+                
+                if result.get("success"):
+                    logger.info(f"[ScheduledBackup] Backup completed successfully for device {device_id}")
+                    return
+                else:
+                    logger.warning(f"[ScheduledBackup] Backup failed for device {device_id}: {result.get('message')}")
+                    
+            except Exception as e:
+                error_message = str(e)
+                logger.error(f"[ScheduledBackup] Backup failed for device {device_id}: {error_message} (attempt {attempt + 1}/{retry_count + 1})")
+                
+                if attempt < retry_count:
+                    logger.info(f"[ScheduledBackup] Retrying in {retry_delay} seconds...")
+                    import time
+                    time.sleep(retry_delay)
+                else:
+                    logger.error(f"[ScheduledBackup] Max retries exceeded for device {device_id}")
+            finally:
+                if db:
+                    db.close()
+                    logger.debug(f"[ScheduledBackup] Database session closed")
 
 
-# 创建全局备份调度器实例
 backup_scheduler = BackupSchedulerService()
 
 
@@ -240,3 +186,4 @@ def get_backup_scheduler() -> BackupSchedulerService:
     获取备份调度器服务实例
     """
     return backup_scheduler
+

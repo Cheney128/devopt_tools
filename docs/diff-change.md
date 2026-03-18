@@ -246,3 +246,107 @@
   ```
 
 **变更原因**：修复 Docker 部署后登录失败的问题。`passlib==1.7.4` 与新版 `bcrypt` (4.1+) 不兼容，新版 `bcrypt` 移除了 `__about__` 属性导致 `passlib` 初始化失败。固定 `bcrypt==4.0.1` 版本后问题解决。
+
+---
+
+### 2026-03-18 00:00:00
+
+**变更文件**：app/services/backup_service.py
+**变更位置**：新增文件
+**变更内容**：
+- 新增 BackupService 类，封装备份核心逻辑
+- 添加 __init__() 方法，初始化 netmiko_service 和 git_service
+- 添加 collect_config() 方法，实现从设备采集配置的核心逻辑
+- 添加 execute_scheduled_backup() 方法，执行定时备份并记录日志
+- 添加详细的日志记录（使用 [BackupService] 前缀）
+- 添加完善的错误处理
+
+**变更原因**：架构优化，将备份核心逻辑从 API 端点中提取出来，提高代码可复用性、可测试性和可维护性。
+
+---
+
+### 2026-03-18 00:05:00
+
+**变更文件**：app/services/backup_scheduler.py
+**变更位置**：第 91 行、第 144-190 行
+**变更内容**：
+- 修改 add_job 调用：args=[schedule.device_id, db] → args=[schedule.device_id]，不再传递数据库会话
+- 修改 _execute_backup：移除 async 关键字，从异步函数改为同步函数
+- 修改 _execute_backup 签名：仅接受 device_id 参数
+- _execute_backup 内部创建 SessionLocal() 会话，不依赖外部传入
+- 使用 asyncio.run() 调用 BackupService.execute_scheduled_backup()
+- 添加 1 次重试机制（间隔 5 秒）
+- 添加详细的日志记录（使用 [ScheduledBackup] 前缀）
+- 使用 try/finally 确保数据库会话关闭
+
+**变更原因**：
+1. 修复异步函数与 APScheduler 不兼容的问题 - APScheduler 是同步调度器，无法正确处理 async 函数
+2. 修复数据库会话传递问题 - 不再传递 HTTP 请求中的 db 会话，避免会话过期问题
+3. 添加重试机制 - 提高网络抖动等临时性故障的成功率
+
+---
+
+### 2026-03-18 00:10:00
+
+**变更文件**：app/api/endpoints/configurations.py
+**变更位置**：第 29 行、第 37-105 行、第 277-342 行、第 639-697 行、第 1190-1283 行
+**变更内容**：
+- 添加导入：from app.services.backup_service import BackupService
+- 修改 create_backup_schedule：移除 netmiko_service 和 git_service 参数
+- 修改 batch_create_backup_schedules：移除 netmiko_service 和 git_service 参数
+- 修改 backup_now：移除 netmiko_service 和 git_service 参数
+- 修改 collect_config_from_device：简化实现，直接调用 BackupService.collect_config()
+
+**变更原因**：架构优化，API 端点不再包含业务逻辑，只负责 HTTP 层处理，所有备份逻辑委托给 BackupService。
+
+---
+
+### 2026-03-18 00:15:00
+
+**变更文件**：app/main.py
+**变更位置**：第 4-13 行、第 61-82 行
+**变更内容**：
+- 添加导入：import logging
+- 添加 logger 初始化：logger = logging.getLogger(__name__)
+- 修改 startup_event：使用 logger.info() 替代 print()
+- 增强启动日志：添加 "[Startup] Loading backup schedules..." 等日志
+- 增强异常日志：使用 logger.error() 替代 print()
+
+**变更原因**：增强启动日志，便于排查调度器初始化和任务加载问题，使用标准的 logging 模块替代 print。
+
+---
+
+### 2026-03-18 00:20:00
+
+**变更文件**：tests/unit/test_backup_service.py
+**变更位置**：新增文件
+**变更内容**：
+- 新增 BackupService 单元测试文件
+- 添加测试用例：
+  - TC-BS-001: collect_config - 设备不存在
+  - TC-BS-002: collect_config - 配置采集失败
+  - TC-BS-003: collect_config - 配置无变化
+  - TC-BS-004: collect_config - 配置有变化
+  - TC-BS-006: execute_scheduled_backup - 成功
+  - TC-BS-007: execute_scheduled_backup - 失败
+- 使用 pytest fixture 创建 mock 对象
+
+**变更原因**：为 BackupService 添加单元测试，确保代码质量和功能正确性。
+
+---
+
+### 2026-03-18 00:25:00
+
+**变更文件**：tests/unit/test_backup_scheduler.py
+**变更位置**：新增文件
+**变更内容**：
+- 新增 BackupSchedulerService 单元测试文件
+- 添加测试用例：
+  - TC-BSCH-001: _execute_backup - 同步函数调用
+  - TC-BSCH-002: _execute_backup - 创建新的数据库会话
+  - TC-BSCH-003: _execute_backup - 调用 asyncio.run()
+  - TC-BSCH-006: add_schedule - 参数传递
+  - TC-BSCH-007: load_schedules - 日志记录
+- 使用 patch 进行依赖注入
+
+**变更原因**：为 BackupSchedulerService 添加单元测试，验证修复方案的正确性。

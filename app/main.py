@@ -2,6 +2,7 @@
 主应用文件
 """
 import os
+import logging
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -10,6 +11,8 @@ from app.api import api_router
 from app.services.backup_scheduler import backup_scheduler
 from app.services.latency_scheduler import init_latency_scheduler
 from app.models import get_db
+
+logger = logging.getLogger(__name__)
 
 # 创建FastAPI应用实例
 app = FastAPI(
@@ -58,28 +61,31 @@ async def startup_event():
     else:
         masked_url = db_url
 
-    print(f"[Startup] DATABASE_URL: {masked_url}")
-    print(f"[Startup] DEPLOY_MODE: {os.getenv('DEPLOY_MODE', '未设置')}")
+    logger.info(f"[Startup] DATABASE_URL: {masked_url}")
+    logger.info(f"[Startup] DEPLOY_MODE: {os.getenv('DEPLOY_MODE', '未设置')}")
 
     # 加载备份任务
     try:
+        logger.info("[Startup] Loading backup schedules...")
         db = next(get_db())
         backup_scheduler.load_schedules(db)
+        logger.info("[Startup] Backup schedules loaded successfully")
     except Exception as e:
-        print(f"Warning: Could not load backup schedules from database: {e}")
-        print("Application will continue without backup scheduler functionality.")
+        logger.error(f"[Startup] Could not load backup schedules from database: {e}")
+        logger.error("[Startup] Application will continue without backup scheduler functionality.")
     
     # 启动延迟检测调度器
     try:
+        logger.info("[Startup] Starting latency scheduler...")
         latency_scheduler = init_latency_scheduler(
             enabled=settings.LATENCY_CHECK_ENABLED,
             interval_minutes=settings.LATENCY_CHECK_INTERVAL
         )
         latency_scheduler.start()
-        print(f"[Startup] Latency scheduler started (enabled={settings.LATENCY_CHECK_ENABLED}, interval={settings.LATENCY_CHECK_INTERVAL}min)")
+        logger.info(f"[Startup] Latency scheduler started (enabled={settings.LATENCY_CHECK_ENABLED}, interval={settings.LATENCY_CHECK_INTERVAL}min)")
     except Exception as e:
-        print(f"Warning: Could not start latency scheduler: {e}")
-        print("Application will continue without latency scheduler functionality.")
+        logger.error(f"[Startup] Could not start latency scheduler: {e}")
+        logger.error("[Startup] Application will continue without latency scheduler functionality.")
 
 
 @app.get("/")
