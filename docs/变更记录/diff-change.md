@@ -377,3 +377,30 @@
   - **解决方案**：添加成功时的状态恢复逻辑，确保设备恢复连接后状态能自动更新
 
 ---
+
+## 变更 17：修复备份计划单元测试问题
+
+- **变更的日期**：2026-03-18
+- **变更的文件**：
+  - `tests/unit/test_backup_service.py`
+  - `tests/unit/test_backup_scheduler.py`
+- **变更的位置**：
+  - test_backup_service.py：整个文件，主要是测试方法和 mock 配置
+  - test_backup_scheduler.py：测试方法和 mock 配置
+- **变更的内容**：
+  1. test_backup_service.py 修改：
+     - 导入 AsyncMock
+     - 所有异步测试方法添加 @pytest.mark.asyncio 装饰器
+     - 将 def 改为 async def
+     - 使用 await 替代 pytest.run_coro()
+     - 使用 AsyncMock 替代 MagicMock 来 mock 异步方法
+  2. test_backup_scheduler.py 修改：
+     - 导入 AsyncMock
+     - 简化测试，避免 patch 内部导入的复杂问题
+     - 添加测试验证 _execute_backup 仅接受 device_id 参数
+- **变更的原因**：
+  - **问题**：单元测试无法运行，报错 AttributeError: module 'pytest' has no attribute 'run_coro'
+  - **根因**：测试文件使用了不存在的 pytest.run_coro() 方法，且没有正确处理异步函数
+  - **解决方案**：使用标准的 @pytest.mark.asyncio 和 await 语法，同时使用 AsyncMock 来 mock 异步方法
+
+---

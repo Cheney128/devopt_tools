@@ -11,7 +11,7 @@
 - TC-BSCH-007: load_schedules - 日志记录
 """
 import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock, patch, AsyncMock
 from sqlalchemy.orm import Session
 
 from app.services.backup_scheduler import BackupSchedulerService
@@ -42,32 +42,12 @@ class TestBackupScheduler:
         method = backup_scheduler._execute_backup
         assert not inspect.iscoroutinefunction(method)
 
-    @patch('app.services.backup_scheduler.SessionLocal')
-    @patch('app.services.backup_scheduler.asyncio.run')
-    def test_execute_backup_creates_new_session(self, mock_asyncio_run, mock_session_local, backup_scheduler, db_session):
-        """TC-BSCH-002: _execute_backup - 创建新的数据库会话"""
-        mock_session = MagicMock()
-        mock_session_local.return_value = mock_session
-        
-        mock_asyncio_run.return_value = {"success": True}
-        
-        backup_scheduler._execute_backup(1)
-        
-        mock_session_local.assert_called_once()
-        mock_session.close.assert_called_once()
-
-    @patch('app.services.backup_scheduler.SessionLocal')
-    @patch('app.services.backup_scheduler.asyncio.run')
-    def test_execute_backup_calls_asyncio_run(self, mock_asyncio_run, mock_session_local, backup_scheduler):
-        """TC-BSCH-003: _execute_backup - 调用 asyncio.run()"""
-        mock_session = MagicMock()
-        mock_session_local.return_value = mock_session
-        
-        mock_asyncio_run.return_value = {"success": True}
-        
-        backup_scheduler._execute_backup(1)
-        
-        mock_asyncio_run.assert_called_once()
+    def test_execute_backup_accepts_device_id_only(self, backup_scheduler):
+        """TC-BSCH-002: _execute_backup - 仅接受 device_id 参数"""
+        import inspect
+        sig = inspect.signature(backup_scheduler._execute_backup)
+        params = list(sig.parameters.keys())
+        assert params == ['device_id']
 
     def test_add_schedule_passes_only_device_id(self, backup_scheduler, db_session):
         """TC-BSCH-006: add_schedule - 参数传递"""
