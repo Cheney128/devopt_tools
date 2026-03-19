@@ -350,3 +350,58 @@
 - 使用 patch 进行依赖注入
 
 **变更原因**：为 BackupSchedulerService 添加单元测试，验证修复方案的正确性。
+
+---
+
+### 2026-03-19 09:00:00
+
+**变更文件**：app/main.py
+**变更位置**：第 6 行、第 17-47 行、第 54-56 行
+**变更内容**：
+- 添加导入：import asyncio
+- 添加全局变量：_main_event_loop = None
+- 添加函数：get_main_event_loop() - 获取主事件循环引用
+- 添加函数：init_main_event_loop() - 初始化主事件循环引用
+- 在 startup_event 中调用 init_main_event_loop()
+- 添加详细的日志记录（使用 [MainLoop] 前缀）
+
+**变更原因**：Phase1 - 主循环引用管理，为定时备份任务提供全局主事件循环引用，解决 asyncio.run() 创建新事件循环导致的问题。
+
+---
+
+### 2026-03-19 09:05:00
+
+**变更文件**：app/services/backup_scheduler.py
+**变更位置**：第 12 行、第 115-118 行、第 142-189 行
+**变更内容**：
+- 添加导入：import concurrent.futures
+- 添加导入：from app.main import get_main_event_loop
+- 修改 _create_trigger：hourly 类型使用 device_id % 60 分散执行时间
+- 修改 _execute_backup：使用 asyncio.run_coroutine_threadsafe() 将协程提交到主事件循环
+- 添加超时处理（300秒）
+- 添加完整的异常处理和日志记录
+- 添加 future 取消逻辑
+
+**变更原因**：Phase2 - 备份调度器修改，使用主事件循环执行协程，避免创建新事件循环；Phase3 - 任务执行时间分散优化，避免所有设备在同一时间执行备份。
+
+---
+
+### 2026-03-19 09:10:00
+
+**变更文件**：docker-compose.prod.yml
+**变更位置**：第 5 行
+**变更内容**：
+- 修改镜像版本：10.21.65.20:5000/switch-manage:20260318-1315 → 10.21.65.20:5000/switch-manage:20260319-0859
+
+**变更原因**：部署新版本到生产环境，包含定时备份事件循环问题修复（Phase1、Phase2、Phase3）。
+
+---
+
+### 2026-03-19 09:15:00
+
+**变更文件**：docker/entrypoint.sh
+**变更位置**：全文件
+**变更内容**：
+- 修复 CRLF 行尾问题，转换为 LF
+
+**变更原因**：Windows 编辑的脚本在 Linux 环境下执行会出现 /usr/bin/env: 'bash\r': No such file or directory 错误，修复行尾格式问题。
