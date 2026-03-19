@@ -45,6 +45,15 @@ class Settings:
         self.LATENCY_CHECK_TIMEOUT = int(os.getenv('LATENCY_CHECK_TIMEOUT', '5'))
         self.LATENCY_CHECK_RETRY_COUNT = int(os.getenv('LATENCY_CHECK_RETRY_COUNT', '2'))
 
+        # IP 定位配置
+        self.IP_LOCATION_COLLECTION_ENABLED = os.getenv("IP_LOCATION_COLLECTION_ENABLED", "True").lower() == "true"
+        self.IP_LOCATION_COLLECTION_INTERVAL_HOURS = int(os.getenv("IP_LOCATION_COLLECTION_INTERVAL_HOURS", "3"))
+        self.IP_LOCATION_BATCH_SIZE = int(os.getenv("IP_LOCATION_BATCH_SIZE", "20"))
+        self.IP_LOCATION_BATCH_INTERVAL_SECONDS = int(os.getenv("IP_LOCATION_BATCH_INTERVAL_SECONDS", "120"))
+        self.IP_LOCATION_MAX_CONCURRENT = int(os.getenv("IP_LOCATION_MAX_CONCURRENT", "10"))
+        self.IP_LOCATION_DATA_RETENTION_DAYS = int(os.getenv("IP_LOCATION_DATA_RETENTION_DAYS", "7"))
+        self.IP_LOCATION_SILENT_HOURS = [int(h) for h in os.getenv("IP_LOCATION_SILENT_HOURS", "").split(",") if h.strip()]
+
 
 # 创建全局配置实例
 settings = Settings()

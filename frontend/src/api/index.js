@@ -48,8 +48,8 @@ api.interceptors.response.use(
           // 未登录或 Token 过期
           // 注意：不要在这里清除 token，让调用者（如 authStore.init()）决定如何处理
           // 这样可以避免页面刷新时的竞态条件问题
-          if (config?.url !== '/auth/me' && config?.url !== '/auth/login') {
-            // 只有非初始化请求和非登录请求才显示错误消息和跳转
+          if (config?.url !== '/auth/me') {
+            // 只有非初始化请求才显示错误消息和跳转
             ElMessage.error('登录已过期，请重新登录')
             localStorage.removeItem('token')
             // 使用 window.location 跳转，避免在拦截器中使用 router 导致循环依赖
@@ -146,14 +146,7 @@ export const deviceApi = {
     })
   },
   // 下载设备模板
-  downloadTemplate: () => api.get('/devices/template', { responseType: 'blob' }),
-  
-  // 延迟检测API
-  getDeviceLatency: (id) => api.get(`/devices/${id}/latency`),
-  checkDeviceLatency: (id) => api.post(`/devices/${id}/check-latency`),
-  batchCheckLatency: (ids) => api.post('/devices/batch/check-latency', ids),
-  getLatencyStatus: () => api.get('/devices/latency/status'),
-  updateLatencyConfig: (id, enabled) => api.put(`/devices/${id}/latency-config`, null, { params: { enabled } })
+  downloadTemplate: () => api.get('/devices/template', { responseType: 'blob' })
 }
 
 // 端口API
@@ -284,6 +277,18 @@ export const deviceCollectionApi = {
   searchMacAddresses: (macAddress) => api.post('/device-collection/mac-addresses/search', { mac_address: macAddress }),
   // 获取指定设备的MAC地址表
   getDeviceMacAddresses: (deviceId, params = {}) => api.get(`/device-collection/${deviceId}/mac-addresses`, { params })
+}
+
+// IP 定位 API
+export const ipLocationApi = {
+  // 搜索 IP 地址定位
+  searchIP: (ipAddress) => api.get(`/ip-location/search/${ipAddress}`),
+  // 获取 IP 列表
+  getIPList: (params) => api.get('/ip-location/list', { params }),
+  // 获取收集状态
+  getCollectionStatus: () => api.get('/ip-location/collection/status'),
+  // 触发数据收集
+  triggerCollection: () => api.post('/ip-location/collection/trigger')
 }
 
 export default api

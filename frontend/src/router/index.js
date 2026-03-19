@@ -42,42 +42,33 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
-      path: '/backup-management',
-      name: 'backup-management',
-      component: () => import('../views/BackupManagement.vue'),
-      meta: { requiresAuth: true },
-      children: [
-        {
-          path: '',
-          name: 'backup-overview',
-          component: () => import('../views/BackupManagement.vue')
-        },
-        {
-          path: 'schedules',
-          name: 'backup-schedules-tab',
-          component: () => import('../views/BackupManagement.vue')
-        },
-        {
-          path: 'monitoring',
-          name: 'backup-monitoring-tab',
-          component: () => import('../views/BackupManagement.vue')
-        },
-        {
-          path: 'configs',
-          name: 'backup-configs-tab',
-          component: () => import('../views/BackupManagement.vue')
-        },
-        {
-          path: 'git-configs',
-          name: 'backup-git-configs-tab',
-          component: () => import('../views/BackupManagement.vue')
-        }
-      ]
+      path: '/configurations',
+      name: 'configurations',
+      component: () => import('../views/ConfigurationManagement.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/monitoring',
+      name: 'monitoring',
+      component: () => import('../views/BackupMonitoring.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/backup-schedules',
+      name: 'backup-schedules',
+      component: () => import('../views/BackupScheduleManagement.vue'),
+      meta: { requiresAuth: true }
     },
     {
       path: '/device-collection',
       name: 'device-collection',
       component: () => import('../views/DeviceCollection.vue'),
+      meta: { requiresAuth: true }
+    },
+    {
+      path: '/git-configs',
+      name: 'git-configs',
+      component: () => import('../views/GitConfigManagement.vue'),
       meta: { requiresAuth: true }
     },
     {
@@ -93,41 +84,54 @@ const router = createRouter({
       meta: { requiresAuth: true }
     },
     {
-      path: '/configurations',
-      redirect: '/backup-management'
-    },
-    {
-      path: '/backup-schedules',
-      redirect: '/backup-management/schedules'
-    },
-    {
-      path: '/monitoring',
-      redirect: '/backup-management/monitoring'
-    },
-    {
-      path: '/git-configs',
-      redirect: '/backup-management/git-configs'
+      path: '/ip-location',
+      name: 'ip-location',
+      component: () => import('../views/ip-location/IPLocationIndex.vue'),
+      meta: { requiresAuth: true },
+      children: [
+        {
+          path: '',
+          redirect: 'search'
+        },
+        {
+          path: 'search',
+          name: 'ip-location-search',
+          component: () => import('../views/ip-location/IPLocationSearch.vue'),
+          meta: { requiresAuth: true }
+        },
+        {
+          path: 'list',
+          name: 'ip-location-list',
+          component: () => import('../views/ip-location/IPLocationList.vue'),
+          meta: { requiresAuth: true }
+        }
+      ]
     }
   ]
 })
 
+// 路由守卫
 router.beforeEach(async (to, from, next) => {
   const authStore = useAuthStore()
 
+  // 等待初始化完成（只执行一次）
   if (!authStore.isInitialized && authStore.token) {
     await authStore.init()
   }
 
   const isLoggedIn = authStore.isLoggedIn
 
+  // 1. 已登录用户访问登录页，重定向到首页
   if (to.path === '/login' && isLoggedIn) {
     return next('/')
   }
 
+  // 2. 公开页面，直接访问
   if (to.meta.public) {
     return next()
   }
 
+  // 3. 需要登录的页面
   if (to.meta.requiresAuth) {
     if (!isLoggedIn) {
       return next({
@@ -136,6 +140,7 @@ router.beforeEach(async (to, from, next) => {
       })
     }
 
+    // 4. 检查管理员权限
     if (to.meta.requiresAdmin && !authStore.isAdmin) {
       ElMessage.error('权限不足，无法访问该页面')
       return next('/')

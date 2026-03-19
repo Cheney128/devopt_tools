@@ -11,6 +11,7 @@ from app.config import settings
 from app.api import api_router
 from app.services.backup_scheduler import backup_scheduler
 from app.services.latency_scheduler import init_latency_scheduler
+from app.services.ip_location_scheduler import ip_location_scheduler
 from app.models import get_db
 
 logger = logging.getLogger(__name__)
@@ -119,6 +120,16 @@ async def startup_event():
     except Exception as e:
         logger.error(f"[Startup] Could not start latency scheduler: {e}")
         logger.error("[Startup] Application will continue without latency scheduler functionality.")
+
+    # 加载 IP 定位采集任务
+    try:
+        logger.info("[Startup] Loading IP location schedules...")
+        db = next(get_db())
+        ip_location_scheduler.load_schedules(db)
+        logger.info("[Startup] IP location schedules loaded successfully")
+    except Exception as e:
+        logger.error(f"[Startup] Could not load IP location schedules: {e}")
+        logger.error("[Startup] Application will continue without IP location scheduler functionality.")
 
 
 @app.get("/")

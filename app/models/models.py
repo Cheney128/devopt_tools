@@ -1,3 +1,4 @@
+
 """
 数据模型定义
 定义数据库表结构
@@ -44,6 +45,7 @@ class Device(Base):
     inspections = relationship("Inspection", back_populates="device", cascade="all, delete-orphan")
     configurations = relationship("Configuration", back_populates="device", cascade="all, delete-orphan")
     mac_addresses = relationship("MACAddress", back_populates="device", cascade="all, delete-orphan")
+    arp_entries = relationship("ARPEntry", back_populates="device", cascade="all, delete-orphan")
     device_versions = relationship("DeviceVersion", back_populates="device", cascade="all, delete-orphan")
     backup_schedules = relationship("BackupSchedule", back_populates="device", cascade="all, delete-orphan")
     backup_execution_logs = relationship("BackupExecutionLog", back_populates="device", cascade="all, delete-orphan")
@@ -230,19 +232,57 @@ class MACAddress(Base):
     MAC地址表
     """
     __tablename__ = "mac_addresses"
-    
+
     id = Column(Integer, primary_key=True, index=True, autoincrement=True)
     device_id = Column(Integer, ForeignKey("devices.id"), nullable=False)
     mac_address = Column(String(17), nullable=False, index=True)
     vlan_id = Column(Integer, nullable=True)
     interface = Column(String(100), nullable=False)
     address_type = Column(String(20), nullable=False, default="dynamic")
+    is_trunk = Column(Boolean, nullable=True)
+    learned_from = Column(String(100), nullable=True)
+    aging_time = Column(Integer, nullable=True)
     last_seen = Column(DateTime, nullable=False, default=func.now())
     created_at = Column(DateTime, nullable=False, default=func.now())
     updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
-    
+
+    # 复合索引
+    __table_args__ = (
+        Index("idx_mac_mac_last_seen", "mac_address", "last_seen"),
+        Index("idx_mac_device_interface", "device_id", "interface", "last_seen"),
+    )
+
     # 关联关系
     device = relationship("Device", back_populates="mac_addresses")
+
+
+class ARPEntry(Base):
+    """
+    ARP 表 - 存储 IP ↔ MAC 映射关系
+    """
+    __tablename__ = "arp_entries"
+
+    id = Column(Integer, primary_key=True, index=True, autoincrement=True)
+    device_id = Column(Integer, ForeignKey("devices.id"), nullable=False, index=True)
+    ip_address = Column(String(50), nullable=False, index=True)
+    mac_address = Column(String(17), nullable=False, index=True)
+    vlan_id = Column(Integer, nullable=True, index=True)
+    interface = Column(String(100), nullable=True)
+    arp_type = Column(String(20), nullable=True)  # dynamic/static
+    age_minutes = Column(Integer, nullable=True)
+    last_seen = Column(DateTime, nullable=False, index=True, default=func.now())
+    created_at = Column(DateTime, nullable=False, default=func.now())
+    updated_at = Column(DateTime, nullable=False, default=func.now(), onupdate=func.now())
+
+    # 关联关系
+    device = relationship("Device", back_populates="arp_entries")
+
+    # 复合索引
+    __table_args__ = (
+        Index("idx_arp_ip_last_seen", "ip_address", "last_seen"),
+        Index("idx_arp_mac_last_seen", "mac_address", "last_seen"),
+        Index("idx_arp_device_last_seen", "device_id", "last_seen"),
+    )
 
 
 class DeviceVersion(Base):
