@@ -3,6 +3,7 @@
 """
 import os
 import logging
+import asyncio
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -13,6 +14,35 @@ from app.services.latency_scheduler import init_latency_scheduler
 from app.models import get_db
 
 logger = logging.getLogger(__name__)
+
+# 全局主事件循环引用
+_main_event_loop = None
+
+
+def get_main_event_loop() -> asyncio.AbstractEventLoop:
+    """
+    获取主事件循环引用
+    
+    Returns:
+        asyncio.AbstractEventLoop: 主事件循环对象
+        
+    Raises:
+        RuntimeError: 如果主事件循环未初始化
+    """
+    if _main_event_loop is None:
+        raise RuntimeError("Main event loop not initialized. Call init_main_event_loop() first.")
+    return _main_event_loop
+
+
+def init_main_event_loop() -> None:
+    """
+    初始化主事件循环引用
+    应该在 FastAPI startup 事件中调用
+    """
+    global _main_event_loop
+    _main_event_loop = asyncio.get_running_loop()
+    logger.info(f"[MainLoop] Main event loop initialized: {_main_event_loop}")
+
 
 # 创建FastAPI应用实例
 app = FastAPI(
@@ -51,6 +81,9 @@ async def startup_event():
     """
     应用启动事件
     """
+    # 初始化主事件循环引用
+    init_main_event_loop()
+    
     # 打印数据库连接信息（隐藏密码）
     db_url = os.getenv('DATABASE_URL', '未设置')
     # 隐藏密码部分

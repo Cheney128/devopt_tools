@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from typing import Optional
 import logging
 import uuid
+import concurrent.futures
 
 from app.models import get_db
 from app.models.models import BackupSchedule, Device, Configuration, BackupExecutionLog
@@ -112,7 +113,9 @@ class BackupSchedulerService:
         根据备份类型创建Cron触发器
         """
         if schedule.schedule_type == "hourly":
-            return CronTrigger(minute="0")
+            minute = schedule.device_id % 60
+            logger.info(f"[Scheduler] Hourly schedule for device {schedule.device_id} set to minute={minute}")
+            return CronTrigger(minute=str(minute))
         elif schedule.schedule_type == "daily":
             if schedule.time:
                 hour, minute = map(int, schedule.time.split(":"))
@@ -136,6 +139,7 @@ class BackupSchedulerService:
         import asyncio
         from app.models import SessionLocal
         from app.services.backup_service import BackupService
+        from app.main import get_main_event_loop
         
         task_id = f"scheduled_{uuid.uuid4().hex[:8]}"
         logger.info(f"[ScheduledBackup] Starting backup for device {device_id}, task_id={task_id}")
@@ -145,6 +149,7 @@ class BackupSchedulerService:
         
         for attempt in range(retry_count + 1):
             db = None
+            future = None
             try:
                 logger.info(f"[ScheduledBackup] Creating database session... (attempt {attempt + 1}/{retry_count + 1})")
                 db = SessionLocal()
@@ -152,9 +157,29 @@ class BackupSchedulerService:
                 backup_service = BackupService()
                 
                 logger.info(f"[ScheduledBackup] Calling BackupService.execute_scheduled_backup()...")
-                result = asyncio.run(
-                    backup_service.execute_scheduled_backup(device_id, db, task_id)
-                )
+                try:
+                    main_loop = get_main_event_loop()
+                    logger.info(f"[ScheduledBackup] Submitting coroutine to main loop: {main_loop}")
+                    
+                    future = asyncio.run_coroutine_threadsafe(
+                        backup_service.execute_scheduled_backup(device_id, db, task_id),
+                        main_loop
+                    )
+                    
+                    result = future.result(timeout=300)
+                    logger.info(f"[ScheduledBackup] Coroutine completed with result: {result}")
+                    
+                except RuntimeError as e:
+                    logger.error(f"[ScheduledBackup] Failed to get main event loop: {e}")
+                    raise
+                except concurrent.futures.TimeoutError:
+                    logger.error(f"[ScheduledBackup] Coroutine execution timed out after 300 seconds")
+                    if future:
+                        future.cancel()
+                    raise
+                except Exception as e:
+                    logger.error(f"[ScheduledBackup] Coroutine execution failed: {e}")
+                    raise
                 
                 if result.get("success"):
                     logger.info(f"[ScheduledBackup] Backup completed successfully for device {device_id}")
