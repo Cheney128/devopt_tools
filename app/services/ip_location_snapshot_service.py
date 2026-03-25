@@ -40,7 +40,18 @@ class IPLocationSnapshotService:
         """
         self.db = db
         self.config_manager = IPLocationConfigManager(db)
-        self.config = self.config_manager.get_config_dict_for_service()
+    
+    @property
+    def config(self) -> Dict[str, Any]:
+        """
+        动态获取最新配置
+
+        每次访问时重新从配置管理器获取，支持运行时配置变更。
+
+        Returns:
+            配置字典，包含核心交换机关键词、上联接口关键词等
+        """
+        return self.config_manager.get_config_dict_for_service()
 
     def _new_batch_id(self) -> str:
         """
