@@ -10,9 +10,10 @@ from app.models.models import Base
 from app.models.user_models import User, Role, Permission, CaptchaRecord, user_roles, role_permissions
 from app.models.backup_task import BackupTask, BackupTaskStatus, BackupPriority
 from app.models.models import (
-    Device, Port, VLAN, Inspection, Configuration, 
+    Device, Port, VLAN, Inspection, Configuration,
     MACAddress, DeviceVersion, BackupSchedule, BackupExecutionLog
 )
+from app.models.ip_location import IPLocationCurrent, IPLocationHistory, IPLocationSettings
 
 # 配置 pymysql 作为 MySQL 驱动
 import pymysql
@@ -45,5 +46,6 @@ def get_db():
 __all__ = [
     'Base', 'get_db', 'engine', 'SessionLocal',
     'User', 'Role', 'Permission', 'CaptchaRecord',
-    'user_roles', 'role_permissions'
+    'user_roles', 'role_permissions',
+    'IPLocationCurrent', 'IPLocationHistory', 'IPLocationSettings'
 ]

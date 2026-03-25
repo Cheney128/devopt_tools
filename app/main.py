@@ -8,6 +8,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.config import settings
 from app.api import api_router
 from app.services.backup_scheduler import backup_scheduler
+from app.services.ip_location_scheduler import ip_location_scheduler
 from app.models import get_db
 
 # 创建FastAPI应用实例
@@ -67,6 +68,13 @@ async def startup_event():
     except Exception as e:
         print(f"Warning: Could not load backup schedules from database: {e}")
         print("Application will continue without backup scheduler functionality.")
+
+    # 启动 IP 定位预计算调度器
+    try:
+        ip_location_scheduler.start()
+        print("[Startup] IP Location scheduler started (interval: 10 minutes)")
+    except Exception as e:
+        print(f"Warning: Could not start IP location scheduler: {e}")
 
 
 @app.get("/")
