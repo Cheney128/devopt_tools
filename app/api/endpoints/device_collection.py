@@ -420,7 +420,12 @@ def search_mac_addresses(
     Returns:
         匹配的MAC地址列表
     """
-    query = db.query(MACAddress).filter(MACAddress.mac_address.like(f"%{search_mac}%"))
+    # 转义特殊字符，防止 SQL 注入
+    escaped_search = search_mac.replace("%", r"\%").replace("_", r"\_")
+    # 使用参数化查询，避免 SQL 注入
+    query = db.query(MACAddress).filter(
+        MACAddress.mac_address.like(f"%{escaped_search}%", escape="\\")
+    )
     mac_addresses = query.order_by(MACAddress.last_seen.desc()).all()
     return mac_addresses
 

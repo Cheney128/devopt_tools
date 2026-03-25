@@ -34,12 +34,13 @@ def get_users(
     """
     query = db.query(User)
     
-    # 关键词搜索
+    # 关键词搜索（转义特殊字符，防止 SQL 注入）
     if keyword:
+        escaped_keyword = keyword.replace("%", r"\%").replace("_", r"\_")
         query = query.filter(
             or_(
-                User.username.ilike(f"%{keyword}%"),
-                User.nickname.ilike(f"%{keyword}%")
+                User.username.ilike(f"%{escaped_keyword}%", escape="\\"),
+                User.nickname.ilike(f"%{escaped_keyword}%", escape="\\")
             )
         )
     
