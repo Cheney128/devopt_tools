@@ -161,9 +161,9 @@ switch_scene() {
 
 # 主函数
 main() {
-    if [ $# -eq 0 ]; then
+    if [ $# -eq 0 ] || [ "$1" == "-h" ] || [ "$1" == "--help" ]; then
         show_help
-        exit 1
+        exit 0
     fi
     
     local input="$1"
