@@ -14,7 +14,8 @@ import {
   UserFilled as UserIcon,
   User as UserManagementIcon,
   SwitchButton as LogoutIcon,
-  Calendar as CalendarIcon
+  Calendar as CalendarIcon,
+  Location as LocationIcon
 } from '@element-plus/icons-vue'
 import { useAuthStore } from './stores/authStore'
 
@@ -139,6 +140,10 @@ const goToProfile = () => {
             <el-menu-item index="/git-configs">
               <el-icon><GitIcon /></el-icon>
               <span>Git配置管理</span>
+            </el-menu-item>
+            <el-menu-item index="/ip-location">
+              <el-icon><LocationIcon /></el-icon>
+              <span>IP 定位</span>
             </el-menu-item>
             <el-menu-item v-if="isAdmin" index="/users">
               <el-icon><UserManagementIcon /></el-icon>

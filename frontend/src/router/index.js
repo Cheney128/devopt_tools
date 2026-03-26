@@ -82,6 +82,30 @@ const router = createRouter({
       name: 'profile',
       component: () => import('../views/ProfileView.vue'),
       meta: { requiresAuth: true }
+    },
+    {
+      path: '/ip-location',
+      name: 'ip-location',
+      component: () => import('../views/ip-location/IPLocationIndex.vue'),
+      meta: { requiresAuth: true },
+      children: [
+        {
+          path: '',
+          redirect: 'search'
+        },
+        {
+          path: 'search',
+          name: 'ip-location-search',
+          component: () => import('../views/ip-location/IPLocationSearch.vue'),
+          meta: { requiresAuth: true }
+        },
+        {
+          path: 'list',
+          name: 'ip-location-list',
+          component: () => import('../views/ip-location/IPLocationList.vue'),
+          meta: { requiresAuth: true }
+        }
+      ]
     }
   ]
 })

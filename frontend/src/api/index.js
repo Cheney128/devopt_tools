@@ -279,4 +279,16 @@ export const deviceCollectionApi = {
   getDeviceMacAddresses: (deviceId, params = {}) => api.get(`/device-collection/${deviceId}/mac-addresses`, { params })
 }
 
+// IP 定位 API
+export const ipLocationApi = {
+  // 搜索 IP 地址定位
+  searchIP: (ipAddress) => api.get(`/ip-location/search/${ipAddress}`),
+  // 获取 IP 列表
+  getIPList: (params) => api.get('/ip-location/list', { params }),
+  // 获取收集状态
+  getCollectionStatus: () => api.get('/ip-location/collection/status'),
+  // 触发数据收集
+  triggerCollection: () => api.post('/ip-location/collection/trigger')
+}
+
 export default api
