@@ -140,10 +140,16 @@ router.beforeEach(async (to, from, next) => {
       })
     }
 
-    // 4. 检查管理员权限
-    if (to.meta.requiresAdmin && !authStore.isAdmin) {
-      ElMessage.error('权限不足，无法访问该页面')
-      return next('/')
+    // 4. 检查管理员权限（确保初始化完成后检查）
+    if (to.meta.requiresAdmin) {
+      // 如果还没初始化完成，等待一下
+      if (!authStore.isInitialized) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+      }
+      if (!authStore.isAdmin) {
+        ElMessage.error('权限不足，无法访问该页面')
+        return next('/')
+      }
     }
   }
 
