@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
+
 @router.get("/", response_model=List[ConfigurationSchema])
 def get_configurations(
     skip: int = 0,
@@ -76,37 +77,6 @@ def get_configurations(
     
     return configurations
 
-
-@router.get("/{config_id}", response_model=ConfigurationSchema)
-def get_configuration(config_id: int, db: Session = Depends(get_db)):
-    """
-    获取配置详情
-    """
-    result = db.query(Configuration, Device.hostname.label('device_name')).join(
-        Device, Configuration.device_id == Device.id
-    ).filter(Configuration.id == config_id).first()
-    
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Configuration with id {config_id} not found"
-        )
-    
-    config, device_name = result
-    config_dict = {
-        'id': config.id,
-        'device_id': config.device_id,
-        'device_name': device_name,
-        'config_content': config.config_content,
-        'config_time': config.config_time,
-        'version': config.version,
-        'change_description': config.change_description,
-        'git_commit_id': config.git_commit_id,
-        'created_at': config.created_at
-    }
-    return ConfigurationSchema(**config_dict)
-
-
 @router.post("/", response_model=ConfigurationSchema, status_code=status.HTTP_201_CREATED)
 def create_configuration(configuration: ConfigurationCreate, db: Session = Depends(get_db)):
     """
@@ -136,63 +106,6 @@ def create_configuration(configuration: ConfigurationCreate, db: Session = Depen
         'created_at': db_configuration.created_at
     }
     return ConfigurationSchema(**config_dict)
-
-
-@router.get("/device/{device_id}/latest", response_model=ConfigurationSchema)
-def get_latest_configuration(device_id: int, db: Session = Depends(get_db)):
-    """
-    获取设备最新配置
-    """
-    device = db.query(Device).filter(Device.id == device_id).first()
-    if not device:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Device with id {device_id} not found"
-        )
-    
-    result = db.query(Configuration, Device.hostname.label('device_name')).join(
-        Device, Configuration.device_id == Device.id
-    ).filter(
-        Configuration.device_id == device_id
-    ).order_by(Configuration.config_time.desc()).first()
-    
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No configuration found for device {device_id}"
-        )
-    
-    config, device_name = result
-    config_dict = {
-        'id': config.id,
-        'device_id': config.device_id,
-        'device_name': device_name,
-        'config_content': config.config_content,
-        'config_time': config.config_time,
-        'version': config.version,
-        'change_description': config.change_description,
-        'git_commit_id': config.git_commit_id,
-        'created_at': config.created_at
-    }
-    return ConfigurationSchema(**config_dict)
-
-
-@router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_configuration(config_id: int, db: Session = Depends(get_db)):
-    """
-    删除配置记录
-    """
-    configuration = db.query(Configuration).filter(Configuration.id == config_id).first()
-    if not configuration:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Configuration with id {config_id} not found"
-        )
-    
-    db.delete(configuration)
-    db.commit()
-    return None
-
 
 @router.post("/batch/delete", response_model=dict)
 def batch_delete_configurations(config_ids: List[int], db: Session = Depends(get_db)):
@@ -226,219 +139,6 @@ def batch_delete_configurations(config_ids: List[int], db: Session = Depends(get
         "failed_count": failed_count,
         "failed_configs": failed_configs if failed_configs else None
     }
-
-
-@router.post("/device/{device_id}/collect", response_model=Dict[str, Any])
-async def collect_config_from_device(
-    device_id: int,
-    db: Session = Depends(get_db),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
-):
-    """
-    直接从设备获取配置
-    """
-    try:
-        # 检查设备是否存在
-        device = db.query(Device).filter(Device.id == device_id).first()
-        if not device:
-            return {"success": False, "message": "Device not found"}
-        
-        # 从设备获取配置
-        config_content = await netmiko_service.collect_running_config(device)
-        if not config_content:
-            return {"success": False, "message": "Failed to get config from device"}
-        
-        # 获取设备最新配置
-        latest_config = db.query(Configuration).filter(
-            Configuration.device_id == device_id
-        ).order_by(Configuration.config_time.desc()).first()
-        
-        # 检查配置是否有变化
-        if latest_config and latest_config.config_content == config_content:
-            return {
-                "success": True,
-                "message": "配置无变化，已成功登录并验证",
-                "config_id": latest_config.id,
-                "config_changed": False,
-                "config_size": len(config_content) if config_content else 0
-            }
-        
-        # 生成版本号
-        new_version = "1.0"
-        if latest_config:
-            # 简单的版本号递增逻辑
-            current_version = latest_config.version
-            try:
-                major, minor = map(int, current_version.split("."))
-                new_version = f"{major}.{minor + 1}"
-            except:
-                new_version = "1.0"
-        
-        # 创建新的配置记录
-        new_config = Configuration(
-            device_id=device_id,
-            config_content=config_content,
-            version=new_version,
-            change_description="Auto-collected from device"
-        )
-        
-        # 检查是否有Git配置，如果有则提交到Git（添加错误处理）
-        try:
-            git_config = db.query(GitConfig).filter(GitConfig.is_active == True).first()
-            if git_config:
-                # 为每个设备创建新的GitService实例，避免单例模式下的资源冲突
-                from app.services.git_service import GitService
-                device_git_service = GitService()
-                if device_git_service.init_repo(git_config):
-                    commit_id = device_git_service.commit_config(
-                        device.hostname,
-                        config_content,
-                        f"Auto-update config for {device.hostname} at {datetime.now()}"
-                    )
-                    if commit_id:
-                        device_git_service.push_to_remote()
-                        new_config.git_commit_id = commit_id
-                    device_git_service.close()
-        except Exception as git_error:
-            print(f"Git operation error: {str(git_error)}")
-            # Git操作失败不影响配置获取，继续执行
-        
-        # 保存到数据库
-        db.add(new_config)
-        db.commit()
-        db.refresh(new_config)
-        
-        return {
-            "success": True,
-            "message": "Config collected from device and saved",
-            "config_id": new_config.id,
-            "version": new_config.version
-        }
-    except Exception as e:
-        print(f"Error in collect_config_from_device: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Failed to collect config: {str(e)}"
-        }
-
-
-@router.get("/diff/{config_id1}/{config_id2}", response_model=Dict[str, Any])
-def get_config_diff(
-    config_id1: int,
-    config_id2: int,
-    db: Session = Depends(get_db)
-):
-    """
-    获取两个配置版本之间的差异
-    """
-    # 获取两个配置
-    config1 = db.query(Configuration).filter(Configuration.id == config_id1).first()
-    config2 = db.query(Configuration).filter(Configuration.id == config_id2).first()
-    
-    if not config1:
-        return {"success": False, "message": f"Configuration {config_id1} not found"}
-    
-    if not config2:
-        return {"success": False, "message": f"Configuration {config_id2} not found"}
-    
-    # 确保两个配置属于同一设备
-    if config1.device_id != config2.device_id:
-        return {"success": False, "message": "Configurations belong to different devices"}
-    
-    # 生成diff
-    import difflib
-    
-    if not config1.config_content:
-        config1.config_content = ""
-    if not config2.config_content:
-        config2.config_content = ""
-    
-    diff = difflib.unified_diff(
-        config1.config_content.splitlines(),
-        config2.config_content.splitlines(),
-        fromfile=f"Version {config1.version} ({config1.config_time.strftime('%Y-%m-%d %H:%M:%S')})",
-        tofile=f"Version {config2.version} ({config2.config_time.strftime('%Y-%m-%d %H:%M:%S')})",
-        lineterm=""
-    )
-    
-    diff_content = "\n".join(diff)
-    
-    return {
-        "success": True,
-        "diff": diff_content,
-        "config1": {
-            "id": config1.id,
-            "version": config1.version,
-            "config_time": config1.config_time
-        },
-        "config2": {
-            "id": config2.id,
-            "version": config2.version,
-            "config_time": config2.config_time
-        }
-    }
-
-
-@router.post("/{config_id}/commit-git", response_model=Dict[str, Any])
-def commit_config_to_git(
-    config_id: int,
-    db: Session = Depends(get_db),
-    git_service: GitService = Depends(get_git_service)
-):
-    """
-    手动将配置提交到Git仓库
-    """
-    try:
-        # 获取配置和设备信息
-        result = db.query(Configuration, Device).join(
-            Device, Configuration.device_id == Device.id
-        ).filter(Configuration.id == config_id).first()
-        
-        if not result:
-            return {"success": False, "message": "Configuration not found"}
-        
-        config, device = result
-        
-        # 检查是否已经提交到Git
-        if config.git_commit_id:
-            return {"success": False, "message": "Configuration already committed to Git"}
-        
-        # 获取活跃的Git配置
-        git_config = db.query(GitConfig).filter(GitConfig.is_active == True).first()
-        if not git_config:
-            return {"success": False, "message": "No active Git configuration found"}
-        
-        # 执行Git操作
-        if git_service.init_repo(git_config):
-            commit_id = git_service.commit_config(
-                device.hostname,
-                config.config_content,
-                f"Manual commit for {device.hostname} at {datetime.now()}"
-            )
-            if commit_id:
-                if git_service.push_to_remote():
-                    # 更新配置记录的git_commit_id
-                    config.git_commit_id = commit_id
-                    db.commit()
-                    git_service.close()
-                    return {
-                        "success": True,
-                        "message": "Config successfully committed to Git",
-                        "commit_id": commit_id
-                    }
-                else:
-                    git_service.close()
-                    return {"success": False, "message": "Failed to push to Git remote"}
-            else:
-                git_service.close()
-                return {"success": False, "message": "Failed to commit to Git"}
-        else:
-            return {"success": False, "message": "Failed to initialize Git repo"}
-    except Exception as e:
-        print(f"Git commit error: {str(e)}")
-        return {"success": False, "message": f"Git operation failed: {str(e)}"}
-
 
 @router.post("/backup-schedules", response_model=Dict[str, Any])
 async def create_backup_schedule(
@@ -482,7 +182,6 @@ async def create_backup_schedule(
     except Exception as e:
         print(f"Create backup schedule error: {str(e)}")
         return {"success": False, "message": f"Failed to create backup schedule: {str(e)}"}
-
 
 @router.get("/backup-schedules", response_model=Dict[str, Any])
 def get_backup_schedules(
@@ -535,105 +234,6 @@ def get_backup_schedules(
         "schedules": schedules,
         "total": total
     }
-
-
-@router.get("/backup-schedules/{schedule_id}", response_model=BackupScheduleSchema)
-def get_backup_schedule(
-    schedule_id: int,
-    db: Session = Depends(get_db)
-):
-    """
-    获取单个备份任务详情
-    """
-    result = db.query(BackupSchedule, Device.hostname.label('device_name')).join(
-        Device, BackupSchedule.device_id == Device.id
-    ).filter(BackupSchedule.id == schedule_id).first()
-    
-    if not result:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Backup schedule {schedule_id} not found"
-        )
-    
-    schedule, device_name = result
-    schedule_dict = {
-        'id': schedule.id,
-        'device_id': schedule.device_id,
-        'device_name': device_name,
-        'schedule_type': schedule.schedule_type,
-        'time': schedule.time,
-        'day': schedule.day,
-        'is_active': schedule.is_active,
-        'created_at': schedule.created_at,
-        'updated_at': schedule.updated_at
-    }
-    
-    return BackupScheduleSchema(**schedule_dict)
-
-
-@router.put("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
-def update_backup_schedule(
-    schedule_id: int,
-    schedule_update: BackupScheduleUpdate,
-    db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
-):
-    """
-    更新备份任务
-    """
-    try:
-        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
-        if not db_schedule:
-            return {"success": False, "message": "Backup schedule not found"}
-        
-        # 更新字段
-        update_data = schedule_update.model_dump(exclude_unset=True)
-        for field, value in update_data.items():
-            setattr(db_schedule, field, value)
-        
-        db.commit()
-        db.refresh(db_schedule)
-        
-        # 更新调度器
-        backup_scheduler.update_schedule(db_schedule, db)
-        
-        return {
-            "success": True,
-            "message": "Backup schedule updated successfully"
-        }
-    except Exception as e:
-        print(f"Update backup schedule error: {str(e)}")
-        return {"success": False, "message": f"Failed to update backup schedule: {str(e)}"}
-
-
-@router.delete("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
-def delete_backup_schedule(
-    schedule_id: int,
-    db: Session = Depends(get_db),
-    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
-):
-    """
-    删除备份任务
-    """
-    try:
-        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
-        if not db_schedule:
-            return {"success": False, "message": "Backup schedule not found"}
-        
-        # 从调度器中移除
-        backup_scheduler.remove_schedule(schedule_id)
-        
-        db.delete(db_schedule)
-        db.commit()
-        
-        return {
-            "success": True,
-            "message": "Backup schedule deleted successfully"
-        }
-    except Exception as e:
-        print(f"Delete backup schedule error: {str(e)}")
-        return {"success": False, "message": f"Failed to delete backup schedule: {str(e)}"}
-
 
 @router.post("/backup-schedules/batch", response_model=dict)
 async def batch_create_backup_schedules(
@@ -745,34 +345,6 @@ async def batch_create_backup_schedules(
     except Exception as e:
         print(f"Batch create backup schedules error: {str(e)}")
         return {"success": False, "message": f"Failed to create batch backup schedules: {str(e)}"}
-
-
-@router.post("/device/{device_id}/backup-now", response_model=Dict[str, Any])
-async def backup_now(
-    device_id: int,
-    db: Session = Depends(get_db),
-    netmiko_service: NetmikoService = Depends(get_netmiko_service),
-    git_service: GitService = Depends(get_git_service)
-):
-    """
-    立即执行设备备份
-    """
-    try:
-        # 直接调用现有的collect_config_from_device函数执行备份
-        result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
-        return result
-    except Exception as e:
-        print(f"Backup now error: {str(e)}")
-        return {
-            "success": False,
-            "message": f"Failed to execute backup: {str(e)}"
-        }
-
-
-def get_backup_task_db(task_id: str, db: Session) -> Optional[BackupTask]:
-    """从数据库获取备份任务"""
-    return db.query(BackupTask).filter(BackupTask.task_id == task_id).first()
-
 
 @router.post("/backup-all", response_model=BackupTaskResponse)
 async def backup_all_devices(
@@ -935,7 +507,6 @@ async def _execute_backup_task_sync(
         retry_count=filter_params.retry_count
     )
 
-
 @router.get("/backup-tasks", response_model=BackupTaskListResponse)
 async def list_backup_tasks(
     page: int = Query(1, ge=1),
@@ -969,65 +540,6 @@ async def list_backup_tasks(
         "page": page,
         "page_size": page_size
     }
-
-
-@router.get("/backup-tasks/{task_id}", response_model=Dict[str, Any])
-async def get_backup_task_status(
-    task_id: str,
-    db: Session = Depends(get_db)
-):
-    """获取备份任务状态和详情"""
-    task = get_backup_task_db(task_id, db)
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    
-    return {
-        "task_id": task.task_id,
-        "status": task.status.value if hasattr(task.status, 'value') else task.status,
-        "total": task.total,
-        "completed": task.completed,
-        "success_count": task.success_count,
-        "failed_count": task.failed_count,
-        "message": "",
-        "filters": task.filters,
-        "created_at": task.created_at,
-        "started_at": task.started_at,
-        "completed_at": task.completed_at,
-        "error_details": task.error_details,
-        "progress_percentage": 0.0
-    }
-
-
-@router.post("/backup-tasks/{task_id}/cancel", response_model=CancelTaskResponse)
-async def cancel_backup_task(
-    task_id: str,
-    db: Session = Depends(get_db)
-):
-    """取消备份任务"""
-    task = get_backup_task_db(task_id, db)
-    
-    if not task:
-        raise HTTPException(status_code=404, detail="任务不存在")
-    
-    current_status = task.status.value if hasattr(task.status, 'value') else task.status
-    
-    if current_status == BackupTaskStatus.COMPLETED.value if hasattr(BackupTaskStatus.COMPLETED, 'value') else BackupTaskStatus.COMPLETED:
-        raise HTTPException(status_code=400, detail="任务已完成，无法取消")
-    
-    if current_status == BackupTaskStatus.CANCELLED.value if hasattr(BackupTaskStatus.CANCELLED, 'value') else BackupTaskStatus.CANCELLED:
-        raise HTTPException(status_code=400, detail="任务已取消")
-    
-    task.status = BackupTaskStatus.CANCELLED
-    task.completed_at = datetime.now()
-    db.commit()
-    
-    backup_executor.cancel_task(task_id)
-    
-    return {"message": "任务已取消", "task_id": task_id}
-
-
-# ==================== 监控统计API ====================
 
 @router.get("/monitoring/statistics", response_model=Dict[str, Any])
 async def get_backup_statistics(
@@ -1070,7 +582,6 @@ async def get_backup_statistics(
         "average_execution_time": round(avg_time, 2),
         "last_execution_time": last_execution
     }
-
 
 @router.get("/monitoring/dashboard", response_model=Dict[str, Any])
 async def get_dashboard_summary(
@@ -1130,8 +641,7 @@ async def get_dashboard_summary(
         "devices_backup_today": devices_backup_today
     }
 
-
-@router.get("/monitoring/execution-logs", response_model=List[Dict[str, Any]])
+@router.get("/monitoring/execution-logs", response_model=Dict[str, Any])
 async def get_execution_logs(
     page: int = Query(1, ge=1),
     page_size: int = Query(20, ge=1, le=100),
@@ -1198,7 +708,6 @@ async def get_execution_logs(
         "page_size": page_size
     }
 
-
 @router.get("/monitoring/trends", response_model=List[Dict[str, Any]])
 async def get_backup_trends(
     days: int = Query(7, ge=1, le=30),
@@ -1236,7 +745,6 @@ async def get_backup_trends(
         })
     
     return result
-
 
 @router.get("/monitoring/devices/statistics", response_model=List[Dict[str, Any]])
 async def get_device_backup_statistics(
@@ -1276,3 +784,473 @@ async def get_device_backup_statistics(
         })
     
     return result
+
+@router.get("/{config_id}", response_model=ConfigurationSchema)
+def get_configuration(config_id: int, db: Session = Depends(get_db)):
+    """
+    获取配置详情
+    """
+    result = db.query(Configuration, Device.hostname.label('device_name')).join(
+        Device, Configuration.device_id == Device.id
+    ).filter(Configuration.id == config_id).first()
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Configuration with id {config_id} not found"
+        )
+    
+    config, device_name = result
+    config_dict = {
+        'id': config.id,
+        'device_id': config.device_id,
+        'device_name': device_name,
+        'config_content': config.config_content,
+        'config_time': config.config_time,
+        'version': config.version,
+        'change_description': config.change_description,
+        'git_commit_id': config.git_commit_id,
+        'created_at': config.created_at
+    }
+    return ConfigurationSchema(**config_dict)
+
+@router.get("/device/{device_id}/latest", response_model=ConfigurationSchema)
+def get_latest_configuration(device_id: int, db: Session = Depends(get_db)):
+    """
+    获取设备最新配置
+    """
+    device = db.query(Device).filter(Device.id == device_id).first()
+    if not device:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Device with id {device_id} not found"
+        )
+    
+    result = db.query(Configuration, Device.hostname.label('device_name')).join(
+        Device, Configuration.device_id == Device.id
+    ).filter(
+        Configuration.device_id == device_id
+    ).order_by(Configuration.config_time.desc()).first()
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"No configuration found for device {device_id}"
+        )
+    
+    config, device_name = result
+    config_dict = {
+        'id': config.id,
+        'device_id': config.device_id,
+        'device_name': device_name,
+        'config_content': config.config_content,
+        'config_time': config.config_time,
+        'version': config.version,
+        'change_description': config.change_description,
+        'git_commit_id': config.git_commit_id,
+        'created_at': config.created_at
+    }
+    return ConfigurationSchema(**config_dict)
+
+@router.delete("/{config_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_configuration(config_id: int, db: Session = Depends(get_db)):
+    """
+    删除配置记录
+    """
+    configuration = db.query(Configuration).filter(Configuration.id == config_id).first()
+    if not configuration:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Configuration with id {config_id} not found"
+        )
+    
+    db.delete(configuration)
+    db.commit()
+    return None
+
+@router.post("/device/{device_id}/collect", response_model=Dict[str, Any])
+async def collect_config_from_device(
+    device_id: int,
+    db: Session = Depends(get_db),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    直接从设备获取配置
+    """
+    try:
+        # 检查设备是否存在
+        device = db.query(Device).filter(Device.id == device_id).first()
+        if not device:
+            return {"success": False, "message": "Device not found"}
+        
+        # 从设备获取配置
+        config_content = await netmiko_service.collect_running_config(device)
+        if not config_content:
+            return {"success": False, "message": "Failed to get config from device"}
+        
+        # 获取设备最新配置
+        latest_config = db.query(Configuration).filter(
+            Configuration.device_id == device_id
+        ).order_by(Configuration.config_time.desc()).first()
+        
+        # 检查配置是否有变化
+        if latest_config and latest_config.config_content == config_content:
+            return {
+                "success": True,
+                "message": "配置无变化，已成功登录并验证",
+                "config_id": latest_config.id,
+                "config_changed": False,
+                "config_size": len(config_content) if config_content else 0
+            }
+        
+        # 生成版本号
+        new_version = "1.0"
+        if latest_config:
+            # 简单的版本号递增逻辑
+            current_version = latest_config.version
+            try:
+                major, minor = map(int, current_version.split("."))
+                new_version = f"{major}.{minor + 1}"
+            except:
+                new_version = "1.0"
+        
+        # 创建新的配置记录
+        new_config = Configuration(
+            device_id=device_id,
+            config_content=config_content,
+            version=new_version,
+            change_description="Auto-collected from device"
+        )
+        
+        # 检查是否有Git配置，如果有则提交到Git（添加错误处理）
+        try:
+            git_config = db.query(GitConfig).filter(GitConfig.is_active == True).first()
+            if git_config:
+                # 为每个设备创建新的GitService实例，避免单例模式下的资源冲突
+                from app.services.git_service import GitService
+                device_git_service = GitService()
+                if device_git_service.init_repo(git_config):
+                    commit_id = device_git_service.commit_config(
+                        device.hostname,
+                        config_content,
+                        f"Auto-update config for {device.hostname} at {datetime.now()}"
+                    )
+                    if commit_id:
+                        device_git_service.push_to_remote()
+                        new_config.git_commit_id = commit_id
+                    device_git_service.close()
+        except Exception as git_error:
+            print(f"Git operation error: {str(git_error)}")
+            # Git操作失败不影响配置获取，继续执行
+        
+        # 保存到数据库
+        db.add(new_config)
+        db.commit()
+        db.refresh(new_config)
+        
+        return {
+            "success": True,
+            "message": "Config collected from device and saved",
+            "config_id": new_config.id,
+            "version": new_config.version
+        }
+    except Exception as e:
+        print(f"Error in collect_config_from_device: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to collect config: {str(e)}"
+        }
+
+@router.get("/diff/{config_id1}/{config_id2}", response_model=Dict[str, Any])
+def get_config_diff(
+    config_id1: int,
+    config_id2: int,
+    db: Session = Depends(get_db)
+):
+    """
+    获取两个配置版本之间的差异
+    """
+    # 获取两个配置
+    config1 = db.query(Configuration).filter(Configuration.id == config_id1).first()
+    config2 = db.query(Configuration).filter(Configuration.id == config_id2).first()
+    
+    if not config1:
+        return {"success": False, "message": f"Configuration {config_id1} not found"}
+    
+    if not config2:
+        return {"success": False, "message": f"Configuration {config_id2} not found"}
+    
+    # 确保两个配置属于同一设备
+    if config1.device_id != config2.device_id:
+        return {"success": False, "message": "Configurations belong to different devices"}
+    
+    # 生成diff
+    import difflib
+    
+    if not config1.config_content:
+        config1.config_content = ""
+    if not config2.config_content:
+        config2.config_content = ""
+    
+    diff = difflib.unified_diff(
+        config1.config_content.splitlines(),
+        config2.config_content.splitlines(),
+        fromfile=f"Version {config1.version} ({config1.config_time.strftime('%Y-%m-%d %H:%M:%S')})",
+        tofile=f"Version {config2.version} ({config2.config_time.strftime('%Y-%m-%d %H:%M:%S')})",
+        lineterm=""
+    )
+    
+    diff_content = "\n".join(diff)
+    
+    return {
+        "success": True,
+        "diff": diff_content,
+        "config1": {
+            "id": config1.id,
+            "version": config1.version,
+            "config_time": config1.config_time
+        },
+        "config2": {
+            "id": config2.id,
+            "version": config2.version,
+            "config_time": config2.config_time
+        }
+    }
+
+@router.post("/{config_id}/commit-git", response_model=Dict[str, Any])
+def commit_config_to_git(
+    config_id: int,
+    db: Session = Depends(get_db),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    手动将配置提交到Git仓库
+    """
+    try:
+        # 获取配置和设备信息
+        result = db.query(Configuration, Device).join(
+            Device, Configuration.device_id == Device.id
+        ).filter(Configuration.id == config_id).first()
+        
+        if not result:
+            return {"success": False, "message": "Configuration not found"}
+        
+        config, device = result
+        
+        # 检查是否已经提交到Git
+        if config.git_commit_id:
+            return {"success": False, "message": "Configuration already committed to Git"}
+        
+        # 获取活跃的Git配置
+        git_config = db.query(GitConfig).filter(GitConfig.is_active == True).first()
+        if not git_config:
+            return {"success": False, "message": "No active Git configuration found"}
+        
+        # 执行Git操作
+        if git_service.init_repo(git_config):
+            commit_id = git_service.commit_config(
+                device.hostname,
+                config.config_content,
+                f"Manual commit for {device.hostname} at {datetime.now()}"
+            )
+            if commit_id:
+                if git_service.push_to_remote():
+                    # 更新配置记录的git_commit_id
+                    config.git_commit_id = commit_id
+                    db.commit()
+                    git_service.close()
+                    return {
+                        "success": True,
+                        "message": "Config successfully committed to Git",
+                        "commit_id": commit_id
+                    }
+                else:
+                    git_service.close()
+                    return {"success": False, "message": "Failed to push to Git remote"}
+            else:
+                git_service.close()
+                return {"success": False, "message": "Failed to commit to Git"}
+        else:
+            return {"success": False, "message": "Failed to initialize Git repo"}
+    except Exception as e:
+        print(f"Git commit error: {str(e)}")
+        return {"success": False, "message": f"Git operation failed: {str(e)}"}
+
+@router.get("/backup-schedules/{schedule_id}", response_model=BackupScheduleSchema)
+def get_backup_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db)
+):
+    """
+    获取单个备份任务详情
+    """
+    result = db.query(BackupSchedule, Device.hostname.label('device_name')).join(
+        Device, BackupSchedule.device_id == Device.id
+    ).filter(BackupSchedule.id == schedule_id).first()
+    
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Backup schedule {schedule_id} not found"
+        )
+    
+    schedule, device_name = result
+    schedule_dict = {
+        'id': schedule.id,
+        'device_id': schedule.device_id,
+        'device_name': device_name,
+        'schedule_type': schedule.schedule_type,
+        'time': schedule.time,
+        'day': schedule.day,
+        'is_active': schedule.is_active,
+        'created_at': schedule.created_at,
+        'updated_at': schedule.updated_at
+    }
+    
+    return BackupScheduleSchema(**schedule_dict)
+
+@router.put("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
+def update_backup_schedule(
+    schedule_id: int,
+    schedule_update: BackupScheduleUpdate,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
+):
+    """
+    更新备份任务
+    """
+    try:
+        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
+        if not db_schedule:
+            return {"success": False, "message": "Backup schedule not found"}
+        
+        # 更新字段
+        update_data = schedule_update.model_dump(exclude_unset=True)
+        for field, value in update_data.items():
+            setattr(db_schedule, field, value)
+        
+        db.commit()
+        db.refresh(db_schedule)
+        
+        # 更新调度器
+        backup_scheduler.update_schedule(db_schedule, db)
+        
+        return {
+            "success": True,
+            "message": "Backup schedule updated successfully"
+        }
+    except Exception as e:
+        print(f"Update backup schedule error: {str(e)}")
+        return {"success": False, "message": f"Failed to update backup schedule: {str(e)}"}
+
+@router.delete("/backup-schedules/{schedule_id}", response_model=Dict[str, Any])
+def delete_backup_schedule(
+    schedule_id: int,
+    db: Session = Depends(get_db),
+    backup_scheduler: BackupSchedulerService = Depends(get_backup_scheduler)
+):
+    """
+    删除备份任务
+    """
+    try:
+        db_schedule = db.query(BackupSchedule).filter(BackupSchedule.id == schedule_id).first()
+        if not db_schedule:
+            return {"success": False, "message": "Backup schedule not found"}
+        
+        # 从调度器中移除
+        backup_scheduler.remove_schedule(schedule_id)
+        
+        db.delete(db_schedule)
+        db.commit()
+        
+        return {
+            "success": True,
+            "message": "Backup schedule deleted successfully"
+        }
+    except Exception as e:
+        print(f"Delete backup schedule error: {str(e)}")
+        return {"success": False, "message": f"Failed to delete backup schedule: {str(e)}"}
+
+@router.post("/device/{device_id}/backup-now", response_model=Dict[str, Any])
+async def backup_now(
+    device_id: int,
+    db: Session = Depends(get_db),
+    netmiko_service: NetmikoService = Depends(get_netmiko_service),
+    git_service: GitService = Depends(get_git_service)
+):
+    """
+    立即执行设备备份
+    """
+    try:
+        # 直接调用现有的collect_config_from_device函数执行备份
+        result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
+        return result
+    except Exception as e:
+        print(f"Backup now error: {str(e)}")
+        return {
+            "success": False,
+            "message": f"Failed to execute backup: {str(e)}"
+        }
+
+
+def get_backup_task_db(task_id: str, db: Session) -> Optional[BackupTask]:
+    """从数据库获取备份任务"""
+    return db.query(BackupTask).filter(BackupTask.task_id == task_id).first()
+
+@router.get("/backup-tasks/{task_id}", response_model=Dict[str, Any])
+async def get_backup_task_status(
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """获取备份任务状态和详情"""
+    task = get_backup_task_db(task_id, db)
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    return {
+        "task_id": task.task_id,
+        "status": task.status.value if hasattr(task.status, 'value') else task.status,
+        "total": task.total,
+        "completed": task.completed,
+        "success_count": task.success_count,
+        "failed_count": task.failed_count,
+        "message": "",
+        "filters": task.filters,
+        "created_at": task.created_at,
+        "started_at": task.started_at,
+        "completed_at": task.completed_at,
+        "error_details": task.error_details,
+        "progress_percentage": 0.0
+    }
+
+@router.post("/backup-tasks/{task_id}/cancel", response_model=CancelTaskResponse)
+async def cancel_backup_task(
+    task_id: str,
+    db: Session = Depends(get_db)
+):
+    """取消备份任务"""
+    task = get_backup_task_db(task_id, db)
+    
+    if not task:
+        raise HTTPException(status_code=404, detail="任务不存在")
+    
+    current_status = task.status.value if hasattr(task.status, 'value') else task.status
+    
+    if current_status == BackupTaskStatus.COMPLETED.value if hasattr(BackupTaskStatus.COMPLETED, 'value') else BackupTaskStatus.COMPLETED:
+        raise HTTPException(status_code=400, detail="任务已完成，无法取消")
+    
+    if current_status == BackupTaskStatus.CANCELLED.value if hasattr(BackupTaskStatus.CANCELLED, 'value') else BackupTaskStatus.CANCELLED:
+        raise HTTPException(status_code=400, detail="任务已取消")
+    
+    task.status = BackupTaskStatus.CANCELLED
+    task.completed_at = datetime.now()
+    db.commit()
+    
+    backup_executor.cancel_task(task_id)
+    
+    return {"message": "任务已取消", "task_id": task_id}
+
+
+# ==================== 监控统计API ====================
