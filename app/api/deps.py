@@ -5,7 +5,7 @@ API 依赖项
 from typing import Optional, Generator
 from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.models import get_db, User, Role
 from app.core.security import decode_access_token
@@ -42,8 +42,8 @@ def get_current_user(
     if user_id is None:
         raise credentials_exception
     
-    # 查询用户
-    user = db.query(User).filter(User.id == user_id).first()
+    # 查询用户（预加载 roles 关系，确保序列化时能正确获取）
+    user = db.query(User).options(joinedload(User.roles)).filter(User.id == user_id).first()
     if user is None:
         raise credentials_exception
     
