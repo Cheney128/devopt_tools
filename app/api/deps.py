@@ -42,6 +42,10 @@ def get_current_user(
     if user_id is None:
         raise credentials_exception
     
+    # 确保 user_id 是整数（兼容字符串格式）
+    if isinstance(user_id, str):
+        user_id = int(user_id)
+    
     # 查询用户（预加载 roles 关系，确保序列化时能正确获取）
     user = db.query(User).options(joinedload(User.roles)).filter(User.id == user_id).first()
     if user is None:

@@ -162,7 +162,7 @@ def login(
         expires_in = 30 * 60
     
     access_token = create_access_token(
-        data={"sub": user.id},
+        data={"sub": str(user.id)},
         expires_delta=expires_delta
     )
     
