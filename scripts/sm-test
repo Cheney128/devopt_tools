@@ -1,0 +1,4 @@
+#!/bin/bash
+# switch_manage 快捷命令 - 测试环境
+SCRIPT_DIR="$(dirname "${BASH_SOURCE[0]}")"
+exec "$SCRIPT_DIR/switch-scene.sh" test "$@"
