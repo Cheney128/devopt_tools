@@ -66,6 +66,19 @@ const isIndeterminate = computed(() => {
 })
 
 // 方法
+const formatDateTime = (datetime) => {
+  if (!datetime) return ''
+  const date = new Date(datetime)
+  return date.toLocaleString('zh-CN', {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit'
+  })
+}
+
 const fetchDevices = async () => {
   loading.value = true
   await deviceStore.fetchDevices()
@@ -810,6 +823,18 @@ onMounted(() => {
             >
               {{ statusOptions.find(opt => opt.value === scope.row.status)?.label || scope.row.status }}
             </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="latency" label="延迟 (ms)" min-width="100">
+          <template #default="scope">
+            <span v-if="scope.row.latency">{{ scope.row.latency }} ms</span>
+            <span v-else style="color: #999">-</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="last_latency_check" label="检测时间" min-width="160">
+          <template #default="scope">
+            <span v-if="scope.row.last_latency_check">{{ formatDateTime(scope.row.last_latency_check) }}</span>
+            <span v-else style="color: #999">-</span>
           </template>
         </el-table-column>
         <el-table-column label="操作" width="350" fixed="right">
