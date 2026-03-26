@@ -91,7 +91,7 @@ const router = createRouter({
       children: [
         {
           path: '',
-          redirect: 'search'
+          redirect: '/ip-location/search'
         },
         {
           path: 'search',
