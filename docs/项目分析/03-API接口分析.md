@@ -25,7 +25,8 @@ API结构:
 ├── /device-collection    # 设备信息采集
 ├── /git-configs          # Git配置管理
 ├── /command-templates    # 命令模板管理
-└── /command-history      # 命令执行历史
+├── /command-history      # 命令执行历史
+└── /ip-location          # IP 定位管理 (新增)
 ```
 
 ### 1.2 通用规范
@@ -1551,16 +1552,189 @@ API结构:
 
 ---
 
-## 14. API路由聚合
+## 14. IP 定位管理API (/ip-location) (新增)
 
-### 14.1 路由注册 (app/api/__init__.py)
+> 更新日期：2026-03-27
+> 功能说明：基于 ARP/MAC 表的 IP 地址定位功能
+
+### 14.1 搜索 IP 地址定位
+
+**请求信息**：
+- **Method**: GET
+- **Path**: `/ip-location/search/{ip_address}`
+
+**路径参数**：
+- `ip_address` (string): 要搜索的 IP 地址
+
+**响应示例**：
+```json
+{
+  "success": true,
+  "ip_address": "192.168.1.100",
+  "locations": [
+    {
+      "ip_address": "192.168.1.100",
+      "mac_address": "00:11:22:33:44:55",
+      "device_id": 5,
+      "device_hostname": "SW-Access-01",
+      "device_ip": "192.168.1.2",
+      "device_location": "机房A-1楼",
+      "interface": "GigabitEthernet1/0/10",
+      "vlan_id": 100,
+      "last_seen": "2026-03-27T10:00:00",
+      "confidence": 0.95,
+      "is_uplink": false,
+      "is_core_switch": false,
+      "match_type": "exact"
+    }
+  ],
+  "message": "找到 1 条记录"
+}
+```
+
+**字段说明**：
+- `confidence`: 定位置信度（0.00-1.00），越高越可信
+- `is_uplink`: 是否为上行链路（上行链路定位可信度较低）
+- `is_core_switch`: 是否来自核心交换机
+- `match_type`: 匹配类型（exact-精确匹配/fuzzy-模糊匹配/none-未匹配）
+
+### 14.2 获取 IP 列表
+
+**请求信息**：
+- **Method**: GET
+- **Path**: `/ip-location/list`
+- **Query参数**:
+  - `page` (int): 页码，默认1
+  - `page_size` (int): 每页数量，默认50，最大200
+  - `search` (string): 搜索关键词（IP/MAC/主机名）
+
+**响应示例**：
+```json
+{
+  "total": 500,
+  "items": [
+    {
+      "ip_address": "192.168.1.100",
+      "mac_address": "00:11:22:33:44:55",
+      "mac_device_hostname": "SW-Access-01",
+      "mac_device_ip": "192.168.1.2",
+      "mac_device_location": "机房A-1楼",
+      "access_interface": "GigabitEthernet1/0/10",
+      "vlan_id": 100,
+      "confidence": 0.95,
+      "last_seen": "2026-03-27T10:00:00"
+    }
+  ],
+  "page": 1,
+  "page_size": 50
+}
+```
+
+### 14.3 获取数据收集状态
+
+**请求信息**：
+- **Method**: GET
+- **Path**: `/ip-location/collection/status`
+
+**响应示例**：
+```json
+{
+  "is_running": false,
+  "last_run_at": "2026-03-27T10:00:00",
+  "last_run_success": true,
+  "last_run_message": "收集完成",
+  "devices_total": 50,
+  "devices_completed": 48,
+  "devices_failed": 2,
+  "arp_entries_collected": 1500,
+  "mac_entries_collected": 3000
+}
+```
+
+### 14.4 触发数据收集任务
+
+**请求信息**：
+- **Method**: POST
+- **Path**: `/ip-location/collection/trigger`
+
+**响应示例**：
+```json
+{
+  "success": true,
+  "message": "收集任务已触发",
+  "status": {
+    "is_running": true,
+    "devices_total": 50,
+    "devices_completed": 0,
+    "devices_failed": 0
+  }
+}
+```
+
+### 14.5 IP 定位工作原理
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    IP 定位预计算流程                                  │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  1. 数据收集阶段                                                     │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐            │
+│  │  设备采集    │───▶│  ARP 表采集  │───▶│ arp_current │            │
+│  │  (Netmiko)  │    │             │    │   (数据库)   │            │
+│  └─────────────┘    └─────────────┘    └─────────────┘            │
+│         │                                                           │
+│         ▼                                                           │
+│  ┌─────────────┐                                                    │
+│  │ MAC 地址采集 │───▶ mac_current (数据库)                           │
+│  └─────────────┘                                                    │
+│                                                                     │
+│  2. 预计算阶段 (每 10 分钟自动执行)                                   │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │                    IPLocationCalculator                      │   │
+│  │  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐     │   │
+│  │  │ 加载 ARP    │    │ 加载 MAC    │    │ 加载设备信息 │     │   │
+│  │  │ 批量数据    │    │ 批量数据    │    │ (冗余字段)  │     │   │
+│  │  └──────┬──────┘    └──────┬──────┘    └─────────────┘     │   │
+│  │         │                  │                                  │   │
+│  │         └────────┬─────────┘                                  │   │
+│  │                  ▼                                            │   │
+│  │         ┌─────────────┐                                       │   │
+│  │         │  IP-MAC 匹配 │                                       │   │
+│  │         │  置信度计算  │                                       │   │
+│  │         └──────┬──────┘                                       │   │
+│  │                │                                              │   │
+│  │                ▼                                              │   │
+│  │         ┌───────────────────┐                                 │   │
+│  │         │ip_location_current│                                 │   │
+│  │         │   (预计算结果)     │                                 │   │
+│  │         └───────────────────┘                                 │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+│  3. 归档阶段 (两级验证)                                              │
+│  ┌─────────────────────────────────────────────────────────────┐   │
+│  │  验证1: calculated_at > 阈值时间（默认30分钟）                  │   │
+│  │  验证2: IP 不在当前 ARP 表中                                   │   │
+│  │  ─────────────────────────────────────────────────────────────│   │
+│  │  符合条件 ──▶ ip_location_history (历史记录)                   │   │
+│  └─────────────────────────────────────────────────────────────┘   │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## 15. API路由聚合
+
+### 15.1 路由注册 (app/api/__init__.py)
 
 ```python
 from fastapi import APIRouter
 from app.api.endpoints import (
-    auth, users, devices, ports, vlans, inspections, 
-    configurations, device_collection, 
-    git_configs, command_templates, command_history
+    auth, users, devices, ports, vlans, inspections,
+    configurations, device_collection,
+    git_configs, command_templates, command_history,
+    ip_location  # 新增
 )
 
 api_router = APIRouter()
@@ -1577,9 +1751,10 @@ api_router.include_router(device_collection.router, prefix="/device-collection",
 api_router.include_router(git_configs.router, prefix="/git-configs", tags=["git-configs"])
 api_router.include_router(command_templates.router, prefix="/command-templates", tags=["command-templates"])
 api_router.include_router(command_history.router, prefix="/command-history", tags=["command-history"])
+api_router.include_router(ip_location.router, prefix="/ip-location", tags=["ip-location"])  # 新增
 ```
 
-### 14.2 API统计
+### 15.2 API统计
 
 | 模块 | 端点数量 | 主要功能 |
 |------|----------|----------|
@@ -1595,11 +1770,12 @@ api_router.include_router(command_history.router, prefix="/command-history", tag
 | git-configs | 5 | Git配置管理 |
 | command-templates | 4 | 命令模板管理 |
 | command-history | 3 | 命令执行、历史记录 |
-| **总计** | **66+** | - |
+| ip-location | 4 | IP 定位查询、列表、收集状态、触发收集 (新增) |
+| **总计** | **70+** | - |
 
 ---
 
-## 15. 总结
+## 16. 总结
 
 本项目API设计遵循RESTful规范，具有以下特点：
 
@@ -1611,5 +1787,6 @@ api_router.include_router(command_history.router, prefix="/command-history", tag
 6. **数据验证**：使用Pydantic进行严格的请求数据验证
 7. **认证授权**：JWT Token认证，RBAC权限控制
 8. **监控统计**：完善的备份监控和统计API
+9. **IP 定位功能**：基于预计算的快速 IP 定位查询（新增）
 
 API文档可通过Swagger UI访问：`http://localhost:8000/docs`
