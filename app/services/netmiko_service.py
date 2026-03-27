@@ -637,6 +637,56 @@ class NetmikoService:
 
         return None
 
+    def _parse_arp_table(self, output: str, vendor: str) -> List[Dict[str, Any]]:
+        """
+        解析 ARP 表输出
+
+        Args:
+            output: 命令输出
+            vendor: 设备厂商
+
+        Returns:
+            ARP 条目列表
+        """
+        arp_entries = []
+        lines = output.strip().split('\n')
+        
+        # 跳过表头
+        start_index = 0
+        for i, line in enumerate(lines):
+            if 'IP' in line and 'MAC' in line:
+                start_index = i + 1
+                break
+        
+        for line in lines[start_index:]:
+            if not line.strip():
+                continue
+            
+            parts = line.split()
+            if len(parts) >= 4:
+                try:
+                    if vendor in ['huawei', 'h3c']:
+                        # 华为/H3C 格式：IP 地址  MAC 地址     VLAN  接口
+                        entry = {
+                            'ip_address': parts[0],
+                            'mac_address': parts[1].upper(),
+                            'vlan_id': int(parts[2]) if parts[2].isdigit() else None,
+                            'interface': parts[3] if len(parts) > 3 else None
+                        }
+                    else:  # cisco
+                        # Cisco 格式：Protocol  Address  Age  MAC Addr  Interface
+                        entry = {
+                            'ip_address': parts[1],
+                            'mac_address': parts[3].upper(),
+                            'vlan_id': None,
+                            'interface': parts[4] if len(parts) > 4 else None
+                        }
+                    arp_entries.append(entry)
+                except (ValueError, IndexError):
+                    continue
+        
+        return arp_entries
+
     def parse_mac_table(self, output: str, vendor: str) -> List[Dict[str, Any]]:
         """
         解析MAC地址表
@@ -1069,6 +1119,92 @@ class NetmikoService:
                     print(f"Disconnected from device {device.hostname}")
                 except:
                     pass
+
+
+    async def collect_arp_table(self, device: Device) -> Optional[List[Dict[str, Any]]]:
+        """
+        采集设备 ARP 表
+
+        Args:
+            device: 设备对象
+
+        Returns:
+            ARP 表条目列表，每个条目包含：ip_address, mac_address, vlan_id, interface
+        """
+        if not device.username or not device.password:
+            print(f"Device {device.hostname} missing credentials")
+            return None
+
+        # 根据设备厂商选择命令
+        if device.vendor == "huawei":
+            command = "display arp"
+        elif device.vendor == "h3c":
+            command = "display arp"
+        elif device.vendor == "cisco":
+            command = "show ip arp"
+        else:
+            command = "display arp"  # 默认使用华为命令
+        
+        output = await self.execute_command(device, command)
+        if not output:
+            return None
+
+        # 解析 ARP 表
+        arp_entries = self._parse_arp_table(output, device.vendor)
+        
+        # 添加 device_id 到每个 ARP 条目
+        for arp_entry in arp_entries:
+            arp_entry["device_id"] = device.id
+
+        return arp_entries if arp_entries else None
+
+    async def batch_collect_arp_table(self, devices: List[Device]) -> Dict[str, Any]:
+        """
+        批量采集 ARP 表
+
+        Args:
+            devices: 设备列表
+
+        Returns:
+            采集结果统计
+        """
+        import asyncio
+        
+        tasks = [self.collect_arp_table(device) for device in devices]
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+        
+        success = 0
+        failed = 0
+        details = []
+        
+        for device, result in zip(devices, results):
+            if isinstance(result, Exception):
+                failed += 1
+                details.append({
+                    'device_id': device.id,
+                    'success': False,
+                    'error': str(result)
+                })
+            elif result is not None:
+                success += 1
+                details.append({
+                    'device_id': device.id,
+                    'success': True,
+                    'data': {'arp_table': result}
+                })
+            else:
+                failed += 1
+                details.append({
+                    'device_id': device.id,
+                    'success': False,
+                    'error': 'Empty result'
+                })
+        
+        return {
+            'success': success,
+            'failed': failed,
+            'details': details
+        }
 
     async def collect_mac_table(self, device: Device) -> Optional[List[Dict[str, Any]]]:
         """

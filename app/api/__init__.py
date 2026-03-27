@@ -3,7 +3,7 @@ API路由主文件
 """
 from fastapi import APIRouter
 
-from app.api.endpoints import devices, ports, vlans, inspections, configurations, device_collection, git_configs, command_templates, command_history, auth, users, ip_location
+from app.api.endpoints import devices, ports, vlans, inspections, configurations, device_collection, git_configs, command_templates, command_history, auth, users, ip_location, arp_collection
 
 # 创建API路由器
 api_router = APIRouter()
@@ -21,3 +21,4 @@ api_router.include_router(git_configs.router, prefix="/git-configs", tags=["git-
 api_router.include_router(command_templates.router, prefix="/command-templates", tags=["command-templates"])
 api_router.include_router(command_history.router, prefix="/command-history", tags=["command-history"])
 api_router.include_router(ip_location.router, prefix="/ip-location", tags=["ip-location"])
+api_router.include_router(arp_collection.router, prefix="/arp-collection", tags=["arp-collection"])

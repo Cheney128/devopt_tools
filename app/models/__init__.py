@@ -14,6 +14,7 @@ from app.models.models import (
     MACAddress, DeviceVersion, BackupSchedule, BackupExecutionLog
 )
 from app.models.ip_location import IPLocationCurrent, IPLocationHistory, IPLocationSettings
+from app.models.ip_location_current import ARPEntry, MACAddressCurrent
 
 # 配置 pymysql 作为 MySQL 驱动
 import pymysql
@@ -47,5 +48,6 @@ __all__ = [
     'Base', 'get_db', 'engine', 'SessionLocal',
     'User', 'Role', 'Permission', 'CaptchaRecord',
     'user_roles', 'role_permissions',
-    'IPLocationCurrent', 'IPLocationHistory', 'IPLocationSettings'
+    'IPLocationCurrent', 'IPLocationHistory', 'IPLocationSettings',
+    'ARPEntry', 'MACAddressCurrent'
 ]

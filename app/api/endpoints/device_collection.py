@@ -8,6 +8,7 @@ from typing import List, Optional
 
 from app.models import get_db
 from app.models.models import Device, DeviceVersion, Port, MACAddress
+from app.models.ip_location_current import MACAddressCurrent
 from app.services.netmiko_service import netmiko_service, get_netmiko_service
 from app.schemas.schemas import (
     DeviceCollectionResult, 
@@ -243,12 +244,21 @@ async def collect_mac_table(
                 data=None
             )
         
-        # 清空现有MAC地址表
-        db.query(MACAddress).filter(MACAddress.device_id == device_id).delete()
+        # 清空现有 MAC 地址表（mac_current 表）
+        db.query(MACAddressCurrent).filter(MACAddressCurrent.device_id == device_id).delete()
         
-        # 保存新的MAC地址表
+        # 保存新的 MAC 地址表到 mac_current
+        from datetime import datetime
         for mac_entry in mac_table:
-            mac_address = MACAddress(**mac_entry)
+            mac_address = MACAddressCurrent(
+                mac_address=mac_entry['mac_address'],
+                mac_device_id=device_id,
+                vlan_id=mac_entry.get('vlan_id'),
+                mac_interface=mac_entry['interface'],
+                is_trunk=mac_entry.get('is_trunk', False),
+                interface_description=mac_entry.get('description'),
+                last_seen=datetime.now()
+            )
             db.add(mac_address)
         
         db.commit()
@@ -339,12 +349,20 @@ async def batch_collect_device_info(
                 if 'mac_table' in detail['data']:
                     mac_table = detail['data']['mac_table']
                     # 清空现有MAC地址表
-                    db.query(MACAddress).filter(MACAddress.device_id == device_id).delete()
-                    # 保存新的MAC地址表
+                    db.query(MACAddressCurrent).filter(MACAddressCurrent.device_id == device_id).delete()
+                    # 保存新的 MAC 地址表到 mac_current
+                    from datetime import datetime
                     for mac_entry in mac_table:
-                        mac_address = MACAddress(**mac_entry)
+                        mac_address = MACAddressCurrent(
+                            mac_address=mac_entry['mac_address'],
+                            mac_device_id=device_id,
+                            vlan_id=mac_entry.get('vlan_id'),
+                            mac_interface=mac_entry['interface'],
+                            is_trunk=mac_entry.get('is_trunk', False),
+                            interface_description=mac_entry.get('description'),
+                            last_seen=datetime.now()
+                        )
                         db.add(mac_address)
-        
         db.commit()
         
         return DeviceCollectionResult(
