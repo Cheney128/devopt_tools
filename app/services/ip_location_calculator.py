@@ -578,7 +578,12 @@ class IPLocationCalculator:
         """
         归档下线的 IP
 
-        检测阈值：超过 N 分钟未在 ARP 表中出现
+        两级验证逻辑：
+        1. calculated_at 超过阈值（30 分钟未重新计算）
+        2. 且不在当前 ARP 表中（设备真正下线）
+
+        注意：此方法在 _save_results() 之后调用，刚计算的记录
+        calculated_at 为当前时间，不会被步骤 1 筛选。
 
         Returns:
             归档的记录数
@@ -588,16 +593,33 @@ class IPLocationCalculator:
 
         logger.info(f"检测下线 IP，阈值: {threshold_minutes} 分钟，截止时间: {threshold_time}")
 
-        # 查找需要归档的记录
-        offline_records = self.db.query(IPLocationCurrent).filter(
-            IPLocationCurrent.last_seen < threshold_time
+        # 步骤 1：按 calculated_at 筛选候选记录（修正：使用 calculated_at 替代 last_seen）
+        candidate_records = self.db.query(IPLocationCurrent).filter(
+            IPLocationCurrent.calculated_at < threshold_time
         ).all()
 
-        if not offline_records:
-            logger.info("没有需要归档的下线 IP")
+        if not candidate_records:
+            logger.info("没有需要归档的候选记录")
             return 0
 
-        # 移动到历史表
+        # 步骤 2：获取当前 ARP 表中的所有 IP
+        # 优化：复用已加载的 self._arp_entries，避免重复查询数据库
+        # 注意：_load_arp_entries() 在 calculate_batch() 中已调用
+        current_ips = {entry.ip_address for entry in self._arp_entries}
+
+        # 步骤 3：筛选出真正下线的 IP（不在当前 ARP 表中）
+        offline_records = [
+            record for record in candidate_records
+            if record.ip_address not in current_ips
+        ]
+
+        if not offline_records:
+            logger.info(f"候选记录 {len(candidate_records)} 条均在 ARP 表中，无需归档")
+            return 0
+
+        logger.info(f"发现 {len(offline_records)} 条下线 IP 记录，开始归档...")
+
+        # 步骤 4：移动到历史表
         for record in offline_records:
             history = IPLocationHistory(
                 ip_address=record.ip_address,
