@@ -1171,29 +1171,27 @@ class NetmikoService:
             print(f"Device {device.hostname} missing credentials")
             return None
 
-        # 根据设备厂商选择命令
+        # 根据设备厂商选择命令和超时时间
+        # 最终方案：使用 expect_string=None，让 Netmiko 自动检测提示符
+        # 保留较长的 read_timeout 以应对网络延迟和大型 ARP 表
         if device.vendor == "huawei":
             command = "display arp"
-            expect_string = r'[<>\[].*[>\]]'  # 华为/h3c提示符
-            read_timeout = 65  # ARP表采集可能较慢
+            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT  # ARP表采集可能较慢，使用配置值(默认65s)
         elif device.vendor == "h3c":
             command = "display arp"
-            expect_string = r'[<>\[].*[>\]]'  # 华为/h3c提示符
-            read_timeout = 65
+            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT
         elif device.vendor == "cisco":
             command = "show ip arp"
-            expect_string = r'[\w\-]+(?:\(config[^)]*\))?[#>]'  # Cisco/锐捷提示符（支持配置模式）
-            read_timeout = 50
+            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT
         elif device.vendor == "ruijie":
             command = "show ip arp"
-            expect_string = r'[\w\-]+(?:\(config[^)]*\))?[#>]'
-            read_timeout = 50
+            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT
         else:
             command = "display arp"  # 默认使用华为命令
-            expect_string = r'[<>\[].*[>\]]'
-            read_timeout = 65
+            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT
 
-        output = await self.execute_command(device, command, expect_string=expect_string, read_timeout=read_timeout)
+        # 使用 expect_string=None，让 Netmiko 自动检测提示符
+        output = await self.execute_command(device, command, expect_string=None, read_timeout=read_timeout)
         if not output:
             return None
 
@@ -1272,18 +1270,12 @@ class NetmikoService:
         if not mac_command:
             return None
 
-        # 根据设备厂商设置expect_string和read_timeout
-        if device.vendor in ["huawei", "h3c"]:
-            expect_string = r'[<>\[].*[>\]]'  # 华为/h3c提示符
-            read_timeout = 95  # MAC表采集可能较慢
-        elif device.vendor in ["cisco", "ruijie"]:
-            expect_string = r'[\w\-]+(?:\(config[^)]*\))?[#>]'  # Cisco/锐捷提示符（支持配置模式）
-            read_timeout = 65
-        else:
-            expect_string = r'[<>\[].*[>\]]'  # 默认使用华为风格
-            read_timeout = 95
+        # 最终方案：使用 expect_string=None，让 Netmiko 自动检测提示符
+        # 保留较长的 read_timeout 以应对网络延迟和大型 MAC 表
+        read_timeout = settings.NETMIKO_MAC_TABLE_TIMEOUT  # MAC表采集可能较慢，使用配置值(默认95s)
 
-        output = await self.execute_command(device, mac_command, expect_string=expect_string, read_timeout=read_timeout)
+        # 使用 expect_string=None，让 Netmiko 自动检测提示符
+        output = await self.execute_command(device, mac_command, expect_string=None, read_timeout=read_timeout)
         if not output:
             return None
 

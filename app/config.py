@@ -45,14 +45,14 @@ class Settings:
             os.getenv('ARP_MAC_COLLECTION_INTERVAL', '30')
         )
 
-        # Netmiko 超时配置（优化版）
+        # Netmiko 超时配置（最终方案）
         self.NETMIKO_DEFAULT_TIMEOUT = int(os.getenv('NETMIKO_DEFAULT_TIMEOUT', '20'))
         self.NETMIKO_ARP_TABLE_TIMEOUT = int(os.getenv('NETMIKO_ARP_TABLE_TIMEOUT', '65'))
         self.NETMIKO_MAC_TABLE_TIMEOUT = int(os.getenv('NETMIKO_MAC_TABLE_TIMEOUT', '95'))
         self.NETMIKO_MAX_TIMEOUT = int(os.getenv('NETMIKO_MAX_TIMEOUT', '240'))
         self.NETMIKO_NETWORK_DELAY_COMPENSATION = int(os.getenv('NETMIKO_NETWORK_DELAY_COMPENSATION', '5'))
         self.NETMIKO_DYNAMIC_TIMEOUT_ENABLED = os.getenv('NETMIKO_DYNAMIC_TIMEOUT_ENABLED', 'True').lower() == 'true'
-        self.NETMIKO_USE_EXPECT_STRING = os.getenv('NETMIKO_USE_EXPECT_STRING', 'True').lower() == 'true'
+        self.NETMIKO_USE_OPTIMIZED_METHOD = os.getenv('NETMIKO_USE_OPTIMIZED_METHOD', 'True').lower() == 'true'
 
 
 # 创建全局配置实例
