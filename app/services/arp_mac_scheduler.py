@@ -8,6 +8,7 @@ ARP+MAC 批量采集调度器
 3. 支持事务保护，采集失败时不污染数据
 """
 
+import asyncio
 import logging
 import uuid
 from datetime import datetime
@@ -106,15 +107,19 @@ class ARPMACScheduler:
         logger.info(f"批量采集完成：{stats}")
         return stats
 
-    def _collect_device(self, device: Device) -> dict:
+    async def _collect_device_async(self, device: Device) -> dict:
         """
-        采集单个设备的 ARP 和 MAC 表
+        异步采集单个设备的 ARP 和 MAC 表（使用 asyncio.gather 并行采集）
+
+        注意：此方法在独立事件循环中执行，数据库 Session 操作在 asyncio.run() 内部完成。
+        SQLAlchemy Session 在同步上下文中创建，但在此异步方法内部仅执行同步数据库操作，
+        不涉及异步数据库驱动，因此线程安全。
 
         Args:
             device: 设备对象
 
         Returns:
-            采集结果
+            采集结果字典
         """
         device_stats = {
             'device_id': device.id,
@@ -126,14 +131,23 @@ class ARPMACScheduler:
         }
 
         try:
-            # 采集 ARP 表
-            arp_table = self.netmiko.collect_arp_table(device)
-            if arp_table:
+            # 并行采集 ARP 和 MAC 表
+            arp_task = self.netmiko.collect_arp_table(device)
+            mac_task = self.netmiko.collect_mac_table(device)
+
+            arp_table, mac_table = await asyncio.gather(
+                arp_task,
+                mac_task,
+                return_exceptions=True
+            )
+
+            # 处理 ARP 表
+            if arp_table and not isinstance(arp_table, Exception):
                 # 清空并保存
                 self.db.query(ARPEntry).filter(
                     ARPEntry.arp_device_id == device.id
                 ).delete()
-                
+
                 for entry in arp_table:
                     arp_entry = ARPEntry(
                         ip_address=entry['ip_address'],
@@ -145,21 +159,23 @@ class ARPMACScheduler:
                         collection_batch_id=f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
                     )
                     self.db.add(arp_entry)
-                
+
                 device_stats['arp_success'] = True
                 device_stats['arp_entries_count'] = len(arp_table)
                 logger.info(f"设备 {device.hostname} ARP 采集成功：{len(arp_table)} 条")
+            elif isinstance(arp_table, Exception):
+                logger.error(f"设备 {device.hostname} ARP 采集失败：{arp_table}")
+                device_stats['error'] = str(arp_table)
             else:
                 logger.warning(f"设备 {device.hostname} ARP 采集返回空结果")
 
-            # 采集 MAC 表
-            mac_table = self.netmiko.collect_mac_table(device)
-            if mac_table:
+            # 处理 MAC 表
+            if mac_table and not isinstance(mac_table, Exception):
                 # 清空并保存
                 self.db.query(MACAddressCurrent).filter(
                     MACAddressCurrent.mac_device_id == device.id
                 ).delete()
-                
+
                 for entry in mac_table:
                     mac_entry = MACAddressCurrent(
                         mac_address=entry['mac_address'],
@@ -171,22 +187,109 @@ class ARPMACScheduler:
                         last_seen=datetime.now()
                     )
                     self.db.add(mac_entry)
-                
+
                 device_stats['mac_success'] = True
                 device_stats['mac_entries_count'] = len(mac_table)
                 logger.info(f"设备 {device.hostname} MAC 采集成功：{len(mac_table)} 条")
+            elif isinstance(mac_table, Exception):
+                logger.error(f"设备 {device.hostname} MAC 采集失败：{mac_table}")
+                if 'error' not in device_stats:
+                    device_stats['error'] = str(mac_table)
             else:
                 logger.warning(f"设备 {device.hostname} MAC 采集返回空结果")
 
             # 提交事务
             self.db.commit()
+            logger.debug(f"设备 {device.hostname} 数据库事务提交成功")
 
         except Exception as e:
-            logger.error(f"设备 {device.hostname} 采集失败：{str(e)}")
+            logger.error(f"设备 {device.hostname} 采集失败：{str(e)}", exc_info=True)
             self.db.rollback()
+            logger.warning(f"设备 {device.hostname} 数据库事务已回滚")
             device_stats['error'] = str(e)
 
         return device_stats
+
+    def _run_async(self, coro):
+        """
+        异步方法运行辅助方法（支持三层降级策略）
+
+        此方法提供多层降级策略：
+        1. 优先使用 asyncio.run() 创建独立事件循环
+        2. 若检测到已有事件循环，尝试使用 nest_asyncio
+        3. 若 nest_asyncio 不可用，在新线程中运行
+
+        Args:
+            coro: 异步协程对象
+
+        Returns:
+            协程执行结果
+
+        Raises:
+            RuntimeError: 若所有方案均失败
+        """
+        try:
+            # 方案 1: 直接使用 asyncio.run()
+            return asyncio.run(coro)
+        except RuntimeError as e:
+            if "asyncio.run() cannot be called from a running event loop" in str(e):
+                logger.warning("检测到已有运行的事件循环，尝试降级方案")
+
+                # 方案 2: 使用 nest_asyncio
+                try:
+                    import nest_asyncio
+                    nest_asyncio.apply()
+                    loop = asyncio.get_running_loop()
+                    logger.debug("使用 nest_asyncio 处理嵌套事件循环")
+                    return loop.run_until_complete(coro)
+                except ImportError:
+                    logger.debug("nest_asyncio 未安装，使用线程降级方案")
+                except RuntimeError as thread_error:
+                    logger.warning(f"nest_asyncio 方案失败：{thread_error}")
+
+                # 方案 3: 在新线程中运行
+                import threading
+                result = None
+                exception = None
+
+                def run_in_thread():
+                    nonlocal result, exception
+                    try:
+                        result = asyncio.run(coro)
+                    except Exception as ex:
+                        exception = ex
+
+                thread = threading.Thread(target=run_in_thread, name="async_collector")
+                thread.start()
+                thread.join(timeout=60)  # 设置超时防止无限等待
+
+                if thread.is_alive():
+                    logger.error("异步采集线程超时（60秒），强制终止")
+                    raise RuntimeError("Async collection thread timeout")
+
+                if exception:
+                    raise exception
+
+                logger.debug("线程降级方案执行成功")
+                return result
+            else:
+                # 非嵌套事件循环的 RuntimeError，直接抛出
+                logger.error(f"asyncio.run() 执行失败：{e}", exc_info=True)
+                raise
+
+    def _collect_device(self, device: Device) -> dict:
+        """
+        采集单个设备的 ARP 和 MAC 表（同步包装方法）
+
+        此方法为调度器调用的同步入口，内部通过 asyncio.run() 创建独立事件循环执行异步采集。
+
+        Args:
+            device: 设备对象
+
+        Returns:
+            采集结果字典
+        """
+        return self._run_async(self._collect_device_async(device))
 
     def collect_and_calculate(self) -> dict:
         """
