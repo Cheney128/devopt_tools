@@ -19,7 +19,7 @@ export const useDeviceStore = defineStore('device', () => {
     }
     // 返回默认状态
     return {
-      searchForm: { status: '', vendor: '' },
+      searchForm: { hostname: '', ip_address: '', status: '', vendor: '' },
       currentPage: 1,
       pageSize: 10
     }
@@ -89,7 +89,7 @@ export const useDeviceStore = defineStore('device', () => {
 
   // 重置搜索表单并保存到localStorage
   function resetSearchForm() {
-    searchForm.value = { status: '', vendor: '' }
+    searchForm.value = { hostname: '', ip_address: '', status: '', vendor: '' }
     saveStateToLocalStorage({
       searchForm: searchForm.value,
       currentPage: currentPage.value,

@@ -28,6 +28,14 @@ const loginMethodOptions = [
   { label: 'Telnet', value: 'telnet' },
   { label: 'Console', value: 'console' }
 ]
+
+// 设备角色选项
+const deviceRoleOptions = [
+  { label: '核心', value: 'core' },
+  { label: '汇聚', value: 'aggregation' },
+  { label: '接入', value: 'access' }
+]
+
 const deviceStore = useDeviceStore()
 const loading = ref(false)
 const dialogVisible = ref(false)
@@ -45,7 +53,8 @@ const form = ref({
   login_port: 22,
   username: '',
   password: '',
-  sn: ''
+  sn: '',
+  device_role: ''
 })
 const formRules = ref({
   hostname: [{ required: true, message: '请输入主机名', trigger: 'blur' }],
@@ -125,7 +134,8 @@ const handleAddDevice = () => {
     login_port: 22,
     username: '',
     password: '',
-    sn: ''
+    sn: '',
+    device_role: ''
   }
   currentDeviceId.value = null
   dialogVisible.value = true
@@ -762,6 +772,27 @@ onMounted(() => {
 
       <!-- 搜索表单 -->
       <el-form :inline="true" :model="deviceStore.searchForm" class="search-form" @submit.prevent>
+        <!-- 主机名搜索框 -->
+        <el-form-item label="主机名">
+          <el-input 
+            v-model="deviceStore.searchForm.hostname" 
+            placeholder="输入主机名" 
+            clearable
+            @keyup.enter="handleSearch"
+            @change="handleSearch"
+          />
+        </el-form-item>
+        <!-- IP 地址搜索框 -->
+        <el-form-item label="IP 地址">
+          <el-input 
+            v-model="deviceStore.searchForm.ip_address" 
+            placeholder="输入 IP 地址" 
+            clearable
+            @keyup.enter="handleSearch"
+            @change="handleSearch"
+          />
+        </el-form-item>
+        <!-- 状态下拉框 -->
         <el-form-item label="状态">
           <el-select 
             v-model="deviceStore.searchForm.status" 
@@ -777,6 +808,7 @@ onMounted(() => {
             />
           </el-select>
         </el-form-item>
+        <!-- 厂商下拉框 -->
         <el-form-item label="厂商">
           <el-select 
             v-model="deviceStore.searchForm.vendor" 
@@ -811,6 +843,20 @@ onMounted(() => {
         <el-table-column prop="ip_address" label="IP地址" min-width="120" />
         <el-table-column prop="vendor" label="厂商" min-width="100" />
         <el-table-column prop="model" label="型号" min-width="120" />
+        <el-table-column prop="device_role" label="设备类型" min-width="100">
+          <template #default="scope">
+            <el-tag
+              :type="
+                scope.row.device_role === 'core' ? 'danger' :
+                scope.row.device_role === 'aggregation' ? 'warning' : 'info'
+              "
+              v-if="scope.row.device_role"
+            >
+              {{ deviceRoleOptions.find(opt => opt.value === scope.row.device_role)?.label || '-' }}
+            </el-tag>
+            <span v-else style="color: #999">-</span>
+          </template>
+        </el-table-column>
         <el-table-column prop="location" label="位置" min-width="120" />
         <el-table-column prop="status" label="状态" min-width="100">
           <template #default="scope">
@@ -900,6 +946,16 @@ onMounted(() => {
           <el-select v-model="form.status" placeholder="请选择状态">
             <el-option
               v-for="option in statusOptions"
+              :key="option.value"
+              :label="option.label"
+              :value="option.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="设备类型">
+          <el-select v-model="form.device_role" placeholder="请选择设备类型" clearable>
+            <el-option
+              v-for="option in deviceRoleOptions"
               :key="option.value"
               :label="option.label"
               :value="option.value"

@@ -16,5 +16,37 @@
       "Bash(tasklist:*)",
       "Bash(taskkill:*)"
     ]
+  },
+  "hooks": {
+    "PreCommand": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .harness/hooks/dangerous-cmd-guard.sh"
+          }
+        ]
+      }
+    ],
+    "PostEdit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .harness/hooks/post-edit-verify.sh"
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash .harness/hooks/stop-verify-check.sh"
+          }
+        ]
+      }
+    ]
   }
 }

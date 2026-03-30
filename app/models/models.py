@@ -32,6 +32,7 @@ class Device(Base):
     username = Column(String(100), nullable=True)
     password = Column(String(255), nullable=True)
     sn = Column(String(100), unique=True, nullable=True, index=True)
+    device_role = Column(String(20), nullable=True, comment="设备角色：core(核心), aggregation(汇聚), access(接入)")
     latency = Column(Integer, nullable=True, comment="设备延迟 (ms)")
     last_latency_check = Column(DateTime, nullable=True, comment="最后延迟检查时间")
     latency_check_enabled = Column(Boolean, nullable=False, default=True, comment="是否启用延迟检查")

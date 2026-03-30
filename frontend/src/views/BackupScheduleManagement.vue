@@ -79,10 +79,10 @@
         <el-table-column type="selection" width="55" />
         <el-table-column prop="id" label="ID" width="80" />
         <el-table-column prop="device_name" label="设备名称" min-width="150" />
-        <el-table-column prop="schedule_type" label="类型" width="100">
+        <el-table-column prop="scheduleType" label="类型" width="100">
           <template #default="scope">
-            <el-tag :type="getScheduleTypeType(scope.row.schedule_type)">
-              {{ getScheduleTypeText(scope.row.schedule_type) }}
+            <el-tag :type="getScheduleTypeType(scope.row.scheduleType)">
+              {{ getScheduleTypeText(scope.row.scheduleType) }}
             </el-tag>
           </template>
         </el-table-column>
@@ -189,10 +189,10 @@
         <el-form-item 
           label="备份时间" 
           v-if="formData.schedule_type === 'daily' || formData.schedule_type === 'monthly'"
-          prop="schedule_time"
+          prop="time"
         >
           <el-time-picker
-            v-model="formData.schedule_time"
+            v-model="formData.time"
             format="HH:mm"
             value-format="HH:mm"
             placeholder="选择时间"
@@ -202,10 +202,10 @@
         <el-form-item 
           label="每月日期" 
           v-if="formData.schedule_type === 'monthly'"
-          prop="schedule_day"
+          prop="day"
         >
           <el-input-number
-            v-model="formData.schedule_day"
+            v-model="formData.day"
             :min="1"
             :max="31"
             :step="1"
@@ -274,8 +274,8 @@ export default {
       device_id: null,
       device_name: '',
       schedule_type: 'daily',
-      schedule_time: '02:00',
-      schedule_day: 1,
+      time: '02:00',
+      day: 1,
       is_active: true
     })
 
@@ -287,10 +287,10 @@ export default {
       schedule_type: [
         { required: true, message: '请选择备份周期', trigger: 'change' }
       ],
-      schedule_time: [
+      time: [
         { required: true, message: '请选择备份时间', trigger: 'change' }
       ],
-      schedule_day: [
+      day: [
         { required: true, message: '请输入每月日期', trigger: 'change' }
       ]
     }
@@ -322,9 +322,9 @@ export default {
       if (row.schedule_type === 'hourly') {
         return '每小时执行'
       } else if (row.schedule_type === 'daily') {
-        return row.schedule_time || '未设置'
+        return row.time || '未设置'
       } else if (row.schedule_type === 'monthly') {
-        return `${row.schedule_day || 1}号 ${row.schedule_time || '未设置'}`
+        return `${row.day || 1}号 ${row.time || '未设置'}`
       }
       return '-'
     }
@@ -348,9 +348,10 @@ export default {
 
         const response = await configurationApi.getBackupSchedules(params)
         
-        // 为每个计划添加备份加载状态
+        // 为每个计划添加备份加载状态，并映射字段名（API 返回 isActive，前端使用 is_active）
         scheduleList.value = (response.schedules || []).map(schedule => ({
           ...schedule,
+          is_active: schedule.isActive,  // 将 API 返回的 isActive 映射为 is_active
           backupLoading: false
         }))
         totalCount.value = response.total || 0
@@ -404,8 +405,8 @@ export default {
       formData.device_id = schedule.device_id
       formData.device_name = schedule.device_name
       formData.schedule_type = schedule.schedule_type
-      formData.schedule_time = schedule.schedule_time
-      formData.schedule_day = schedule.schedule_day
+      formData.time = schedule.time
+      formData.day = schedule.day
       formData.is_active = schedule.is_active
       
       showDialog.value = true
@@ -416,8 +417,8 @@ export default {
       formData.device_id = null
       formData.device_name = ''
       formData.schedule_type = 'daily'
-      formData.schedule_time = '02:00'
-      formData.schedule_day = 1
+      formData.time = '02:00'
+      formData.day = 1
       formData.is_active = true
     }
 
@@ -436,10 +437,10 @@ export default {
 
           // 根据类型添加时间参数
           if (formData.schedule_type === 'daily' || formData.schedule_type === 'monthly') {
-            payload.schedule_time = formData.schedule_time
+            payload.time = formData.time
           }
           if (formData.schedule_type === 'monthly') {
-            payload.schedule_day = formData.schedule_day
+            payload.day = formData.day
           }
 
           if (dialogMode.value === 'create') {

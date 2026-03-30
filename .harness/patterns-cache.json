@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "switch_manage Pattern Rules",
+  "version": "1.0.0",
+  "createdAt": "2026-03-29T00:00:00+08:00",
+  "patterns": [
+    {
+      "id": "SM001",
+      "name": "禁止直接操作生产数据库",
+      "type": "command",
+      "level": "error",
+      "pattern": {
+        "forbidden": ["mysql.*10.23.65.95", "psql.*10.23.65.95"],
+        "reason": "生产数据库 (10.23.65.95) 禁止直接操作"
+      }
+    },
+    {
+      "id": "SM002",
+      "name": "禁止删除设备表数据",
+      "type": "command",
+      "level": "error",
+      "pattern": {
+        "forbidden": ["DROP TABLE devices", "TRUNCATE devices", "DELETE FROM devices"],
+        "reason": "禁止删除设备表数据"
+      }
+    },
+    {
+      "id": "SM003",
+      "name": "禁止强制推送主分支",
+      "type": "command",
+      "level": "error",
+      "pattern": {
+        "forbidden": ["git push --force main", "git push --force master"],
+        "reason": "强制推送可能覆盖他人提交"
+      }
+    },
+    {
+      "id": "SM004",
+      "name": "禁止硬编码数据库密码",
+      "type": "code",
+      "level": "warn",
+      "pattern": {
+        "check": "(password|passwd|pwd)\\s*=\\s*['\"][^'\"]+['\"]",
+        "reason": "密码不应硬编码，应使用环境变量",
+        "fix": "使用 os.environ.get('DB_PASSWORD')"
+      }
+    },
+    {
+      "id": "SM005",
+      "name": "禁止 SQL 拼接",
+      "type": "code",
+      "level": "error",
+      "pattern": {
+        "check": "(SELECT|INSERT|UPDATE|DELETE).*\\+.*\\$",
+        "reason": "SQL 拼接存在注入风险",
+        "fix": "使用参数化查询或 ORM"
+      }
+    },
+    {
+      "id": "SM006",
+      "name": "禁止提交大文件",
+      "type": "command",
+      "level": "warn",
+      "pattern": {
+        "forbidden": ["git add *.log", "git add *.sql"],
+        "reason": "日志文件和 SQL 文件不应提交"
+      }
+    },
+    {
+      "id": "SM007",
+      "name": "禁止修改文件权限为 777",
+      "type": "command",
+      "level": "warn",
+      "pattern": {
+        "forbidden": ["chmod 777", "chmod -R 777"],
+        "reason": "777 权限过度开放，存在安全风险"
+      }
+    },
+    {
+      "id": "SM008",
+      "name": "前端文件必须有类型注解",
+      "type": "code",
+      "level": "warn",
+      "pattern": {
+        "check": "\\.tsx?$",
+        "reason": "TypeScript 文件应有类型注解",
+        "scope": "frontend/src/**/*.ts"
+      }
+    }
+  ],
+  "metadata": {
+    "totalPatterns": 8,
+    "errorLevel": 4,
+    "warnLevel": 4,
+    "noiseLevel": 0
+  }
+}

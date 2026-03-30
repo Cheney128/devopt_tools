@@ -37,9 +37,18 @@ class DeviceBase(BaseModel):
     username: Optional[str] = Field(None, description="登录用户名")
     password: Optional[str] = Field(None, description="登录密码")
     sn: Optional[str] = Field(None, description="设备序列号")
+    device_role: Optional[str] = Field(None, description="设备角色：core(核心), aggregation(汇聚), access(接入)")
     latency: Optional[int] = Field(None, description="设备延迟 (ms)")
     last_latency_check: Optional[datetime] = Field(None, description="最后延迟检查时间")
     latency_check_enabled: bool = Field(True, description="是否启用延迟检查")
+
+    @field_validator('device_role')
+    @classmethod
+    def validate_device_role(cls, v):
+        """验证设备角色"""
+        if v and v not in ['core', 'aggregation', 'access']:
+            raise ValueError('Device role must be core, aggregation, or access')
+        return v
 
     @field_validator('ip_address')
     @classmethod
@@ -97,9 +106,18 @@ class DeviceUpdate(BaseModel):
     username: Optional[str] = Field(None, description="登录用户名")
     password: Optional[str] = Field(None, description="登录密码")
     sn: Optional[str] = Field(None, description="设备序列号")
+    device_role: Optional[str] = Field(None, description="设备角色：core(核心), aggregation(汇聚), access(接入)")
     latency: Optional[int] = Field(None, description="设备延迟 (ms)")
     last_latency_check: Optional[datetime] = Field(None, description="最后延迟检查时间")
     latency_check_enabled: Optional[bool] = Field(None, description="是否启用延迟检查")
+
+    @field_validator('device_role')
+    @classmethod
+    def validate_device_role(cls, v):
+        """验证设备角色"""
+        if v and v not in ['core', 'aggregation', 'access']:
+            raise ValueError('Device role must be core, aggregation, or access')
+        return v
 
 
 class Device(DeviceBase):

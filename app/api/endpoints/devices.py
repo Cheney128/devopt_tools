@@ -24,10 +24,24 @@ def get_devices(
     page_size: int = 10,
     status: Optional[str] = None,
     vendor: Optional[str] = None,
+    hostname: Optional[str] = None,
+    ip_address: Optional[str] = None,
     db: Session = Depends(get_db)
 ):
     """
     获取设备列表
+    
+    Args:
+        page: 页码，默认 1
+        page_size: 每页数量，默认 10
+        status: 按状态筛选
+        vendor: 按厂商筛选
+        hostname: 按主机名模糊搜索
+        ip_address: 按 IP 地址模糊搜索
+        db: 数据库会话
+    
+    Returns:
+        设备列表，包含 total(总数), devices(设备列表), page(页码), page_size(每页数量)
     """
     # 转换page和page_size为skip和limit
     skip = (page - 1) * page_size
@@ -40,6 +54,14 @@ def get_devices(
     
     if vendor:
         query = query.filter(Device.vendor == vendor)
+    
+    # 主机名模糊搜索 (支持 LIKE 查询)
+    if hostname:
+        query = query.filter(Device.hostname.contains(hostname))
+    
+    # IP 地址模糊搜索 (支持 LIKE 查询)
+    if ip_address:
+        query = query.filter(Device.ip_address.contains(ip_address))
     
     # 获取总记录数
     total = query.count()
