@@ -46,7 +46,7 @@ class ARPMACScheduler:
         self._last_run: Optional[datetime] = None
         self._last_stats: Optional[dict] = None
         self._consecutive_failures: int = 0
-        self.netmiko = get_netmiko_service(db) if db else None
+        self.netmiko = get_netmiko_service() if db else None
 
     def collect_all_devices(self) -> dict:
         """
@@ -239,7 +239,7 @@ class ARPMACScheduler:
         # 如果提供了新的 db，更新它
         if db:
             self.db = db
-            self.netmiko = get_netmiko_service(db)
+            self.netmiko = get_netmiko_service()
         
         # 添加定时任务
         self.scheduler.add_job(
