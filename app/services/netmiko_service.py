@@ -15,6 +15,7 @@ except ImportError:
     ConnectHandler = None
 
 from app.models.models import Device
+from app.config import settings
 
 
 class NetmikoService:
@@ -282,19 +283,19 @@ class NetmikoService:
             }
         elif vendor_lower in ['cisco', 'ruijie', '锐捷']:
             return {
-                'user_view': r'.*#',            # 特权模式: hostname#
-                'config_view': r'\(config.*\)#', # 配置模式: hostname(config)#
-                'any_view': r'.*[#>]'
+                'user_view': r'[\w\-]+#',            # 特权模式: hostname#
+                'config_view': r'[\w\-]+\(config[^)]*\)#', # 配置模式: hostname(config)#
+                'any_view': r'[\w\-]+(?:\(config[^)]*\))?[#>]'  # 支持配置模式
             }
         else:
             # 默认使用Cisco风格
             return {
-                'user_view': r'.*#',
-                'config_view': r'\(config.*\)#',
-                'any_view': r'.*[#>]'
+                'user_view': r'[\w\-]+#',
+                'config_view': r'[\w\-]+\(config[^)]*\)#',
+                'any_view': r'[\w\-]+(?:\(config[^)]*\))?[#>]'
             }
 
-    async def execute_command(self, device: Device, command: str, expect_string: Optional[str] = None, read_timeout: int = 20) -> Optional[str]:
+    async def execute_command(self, device: Device, command: str, expect_string: Optional[str] = None, read_timeout: int = 20, use_expect_string: Optional[bool] = None) -> Optional[str]:
         """
         在设备上执行命令（带增强的错误处理）
 
@@ -303,14 +304,19 @@ class NetmikoService:
             command: 要执行的命令
             expect_string: 预期的提示符字符串，用于判断命令执行完成
             read_timeout: 命令执行超时时间（秒）
+            use_expect_string: 是否使用expect_string（回滚开关），None时从配置读取
 
         Returns:
             命令输出，失败返回None
         """
         from app.services.ssh_connection_pool import get_ssh_connection_pool
 
+        # 从配置读取是否使用expect_string（回滚开关）
+        if use_expect_string is None:
+            use_expect_string = settings.NETMIKO_USE_EXPECT_STRING
+
         print(f"[INFO] Executing command '{command}' on device {device.hostname} ({device.ip_address})")
-        print(f"[INFO] Command timeout: {read_timeout}s, Expect string: {expect_string}")
+        print(f"[INFO] Command timeout: {read_timeout}s, Expect string: {expect_string}, Use expect_string: {use_expect_string}")
 
         ssh_conn_pool = get_ssh_connection_pool()
         connection = None
@@ -348,12 +354,19 @@ class NetmikoService:
             is_config_cmd = self._is_config_command(command, device.vendor)
 
             try:
-                # 如果用户提供了expect_string，使用用户提供的
-                if expect_string:
+                # 如果用户提供了expect_string且启用use_expect_string，使用用户提供的
+                if expect_string and use_expect_string:
                     print(f"[INFO] Sending command with user-provided expect_string: {expect_string}")
                     output = await loop.run_in_executor(
                         None,
                         lambda: connection.send_command(command, expect_string=expect_string, read_timeout=read_timeout)
+                    )
+                elif expect_string and not use_expect_string:
+                    # 回滚模式：忽略expect_string，使用默认方式
+                    print(f"[INFO] Rollback mode: ignoring expect_string, using default send_command")
+                    output = await loop.run_in_executor(
+                        None,
+                        lambda: connection.send_command(command, read_timeout=read_timeout)
                     )
                 elif is_config_cmd:
                     # 对于配置命令，使用send_config_set方法
@@ -1161,14 +1174,26 @@ class NetmikoService:
         # 根据设备厂商选择命令
         if device.vendor == "huawei":
             command = "display arp"
+            expect_string = r'[<>\[].*[>\]]'  # 华为/h3c提示符
+            read_timeout = 65  # ARP表采集可能较慢
         elif device.vendor == "h3c":
             command = "display arp"
+            expect_string = r'[<>\[].*[>\]]'  # 华为/h3c提示符
+            read_timeout = 65
         elif device.vendor == "cisco":
             command = "show ip arp"
+            expect_string = r'[\w\-]+(?:\(config[^)]*\))?[#>]'  # Cisco/锐捷提示符（支持配置模式）
+            read_timeout = 50
+        elif device.vendor == "ruijie":
+            command = "show ip arp"
+            expect_string = r'[\w\-]+(?:\(config[^)]*\))?[#>]'
+            read_timeout = 50
         else:
             command = "display arp"  # 默认使用华为命令
-        
-        output = await self.execute_command(device, command)
+            expect_string = r'[<>\[].*[>\]]'
+            read_timeout = 65
+
+        output = await self.execute_command(device, command, expect_string=expect_string, read_timeout=read_timeout)
         if not output:
             return None
 
@@ -1247,7 +1272,18 @@ class NetmikoService:
         if not mac_command:
             return None
 
-        output = await self.execute_command(device, mac_command)
+        # 根据设备厂商设置expect_string和read_timeout
+        if device.vendor in ["huawei", "h3c"]:
+            expect_string = r'[<>\[].*[>\]]'  # 华为/h3c提示符
+            read_timeout = 95  # MAC表采集可能较慢
+        elif device.vendor in ["cisco", "ruijie"]:
+            expect_string = r'[\w\-]+(?:\(config[^)]*\))?[#>]'  # Cisco/锐捷提示符（支持配置模式）
+            read_timeout = 65
+        else:
+            expect_string = r'[<>\[].*[>\]]'  # 默认使用华为风格
+            read_timeout = 95
+
+        output = await self.execute_command(device, mac_command, expect_string=expect_string, read_timeout=read_timeout)
         if not output:
             return None
 
