@@ -131,7 +131,7 @@ class ARPMACScheduler:
             if arp_table:
                 # 清空并保存
                 self.db.query(ARPEntry).filter(
-                    ARPEntry.device_id == device.id
+                    ARPEntry.arp_device_id == device.id
                 ).delete()
                 
                 for entry in arp_table:
@@ -157,7 +157,7 @@ class ARPMACScheduler:
             if mac_table:
                 # 清空并保存
                 self.db.query(MACAddressCurrent).filter(
-                    MACAddressCurrent.device_id == device.id
+                    MACAddressCurrent.mac_device_id == device.id
                 ).delete()
                 
                 for entry in mac_table:
@@ -232,6 +232,12 @@ class ARPMACScheduler:
         Args:
             db: 数据库会话（可选，如果初始化时已提供则不需要）
         """
+        from app.config import settings
+        
+        if not settings.ARP_MAC_COLLECTION_ENABLED:
+            logger.info("[ARP/MAC] 采集功能已禁用，跳过启动")
+            return
+        
         if self._is_running:
             logger.warning("ARP/MAC 调度器已在运行中")
             return
@@ -240,6 +246,15 @@ class ARPMACScheduler:
         if db:
             self.db = db
             self.netmiko = get_netmiko_service()
+        
+        # 启动时立即采集（可配置）
+        if settings.ARP_MAC_COLLECTION_ON_STARTUP:
+            try:
+                logger.info("[ARP/MAC] 启动立即采集...")
+                self._run_collection()
+                logger.info("[ARP/MAC] 启动立即采集完成")
+            except Exception as e:
+                logger.error(f"[ARP/MAC] 启动立即采集失败：{e}", exc_info=True)
         
         # 添加定时任务
         self.scheduler.add_job(
@@ -253,7 +268,7 @@ class ARPMACScheduler:
         
         self.scheduler.start()
         self._is_running = True
-        logger.info(f"ARP/MAC 调度器已启动，间隔：{self.interval_minutes} 分钟")
+        logger.info(f"[ARP/MAC] 调度器已启动，间隔：{self.interval_minutes} 分钟")
 
     def shutdown(self):
         """

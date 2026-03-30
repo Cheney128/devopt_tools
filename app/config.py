@@ -39,6 +39,8 @@ class Settings:
         ]
 
         # ARP/MAC 采集配置
+        self.ARP_MAC_COLLECTION_ENABLED = os.getenv('ARP_MAC_COLLECTION_ENABLED', 'True').lower() == 'true'
+        self.ARP_MAC_COLLECTION_ON_STARTUP = os.getenv('ARP_MAC_COLLECTION_ON_STARTUP', 'True').lower() == 'true'
         self.ARP_MAC_COLLECTION_INTERVAL = int(
             os.getenv('ARP_MAC_COLLECTION_INTERVAL', '30')
         )
