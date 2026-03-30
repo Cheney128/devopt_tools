@@ -311,9 +311,11 @@ class NetmikoService:
         """
         from app.services.ssh_connection_pool import get_ssh_connection_pool
 
-        # 从配置读取是否使用expect_string（回滚开关）
+        # 回滚开关逻辑说明:
+        # NETMIKO_USE_OPTIMIZED_METHOD=True  → use_expect_string=False (推荐方案: expect_string=None)
+        # NETMIKO_USE_OPTIMIZED_METHOD=False → use_expect_string=True  (备选方案: vendor-specific expect_string)
         if use_expect_string is None:
-            use_expect_string = settings.NETMIKO_USE_EXPECT_STRING
+            use_expect_string = not settings.NETMIKO_USE_OPTIMIZED_METHOD
 
         print(f"[INFO] Executing command '{command}' on device {device.hostname} ({device.ip_address})")
         print(f"[INFO] Command timeout: {read_timeout}s, Expect string: {expect_string}, Use expect_string: {use_expect_string}")
