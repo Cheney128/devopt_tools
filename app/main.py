@@ -9,6 +9,7 @@ from app.config import settings
 from app.api import api_router
 from app.services.backup_scheduler import backup_scheduler
 from app.services.ip_location_scheduler import ip_location_scheduler
+from app.services.arp_mac_scheduler import arp_mac_scheduler
 from app.models import get_db
 
 # 创建FastAPI应用实例
@@ -75,6 +76,14 @@ async def startup_event():
         print("[Startup] IP Location scheduler started (interval: 10 minutes)")
     except Exception as e:
         print(f"Warning: Could not start IP location scheduler: {e}")
+
+    # 启动 ARP/MAC 采集调度器
+    try:
+        db = next(get_db())
+        arp_mac_scheduler.start(db)
+        print("[Startup] ARP/MAC scheduler started (interval: 30 minutes)")
+    except Exception as e:
+        print(f"Warning: Could not start ARP/MAC scheduler: {e}")
 
 
 @app.get("/")
