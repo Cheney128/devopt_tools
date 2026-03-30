@@ -746,30 +746,53 @@ class NetmikoService:
         return mac_entries
 
     def _parse_huawei_mac_table(self, output: str) -> List[Dict[str, Any]]:
-        """解析华为/H3C MAC地址表"""
+        """
+        解析华为/H3C MAC地址表（空格分隔简单解析）
+
+        华为/H3C MAC地址表格式：
+        MAC Address    VLAN/VSI    Learned-From        Type
+        0011-2233-4455 1/-         GE1/0/1             dynamic
+        """
         mac_entries = []
-
-        # 华为/H3C MAC地址表格式：
-        # MAC Address    VLAN/VSI    Learned-From        Type
-        # 0011-2233-4455 1/-         GE1/0/1             dynamic
-
         lines = output.strip().split('\n')
+
         for line in lines:
             # 跳过标题行和空行
-            if not line.strip() or re.match(r'MAC\s+Address', line, re.IGNORECASE):
+            if not line.strip():
+                continue
+            if 'MAC Address' in line or 'MAC地址' in line:
+                continue
+            if re.match(r'^[=\-]+', line):  # 跳过分隔线
                 continue
 
-            # 匹配MAC地址行 - 使用更灵活的正则（支持GE1/0/1格式）
-            # 华为格式：MAC地址 VLAN/VSI 接口 类型
-            match = re.search(r'([0-9A-Fa-f-]+)\s*(?:[/-]\s*(\d+)/\S*\s*(\S+))', line)
-            if match:
-                mac_raw = match.group(1)
-                mac_entries.append({
-                    "mac_address": mac_raw.upper(),
-                    "vlan_id": int(match.group(2)),
-                    "interface": match.group(3).strip(),
-                    "address_type": match.group(4).lower()
-                })
+            # 使用空格分隔解析
+            parts = line.split()
+            if len(parts) >= 4:
+                try:
+                    # 华为格式: MAC VLAN/VSI 接口 类型
+                    mac_raw = parts[0]
+                    vlan_part = parts[1]  # 格式: "1/-" 或 "10/100" 或 "-"
+
+                    # 提取 VLAN 号（格式处理）
+                    vlan_id = None
+                    if vlan_part and vlan_part != '-':
+                        if '/' in vlan_part:
+                            vlan_str = vlan_part.split('/')[0]
+                            if vlan_str.isdigit():
+                                vlan_id = int(vlan_str)
+                        elif vlan_part.isdigit():
+                            vlan_id = int(vlan_part)
+
+                    mac_entries.append({
+                        "mac_address": mac_raw.upper(),
+                        "vlan_id": vlan_id,
+                        "interface": parts[2].strip(),
+                        "address_type": parts[3].lower() if len(parts) > 3 else "dynamic"
+                    })
+                except (ValueError, IndexError) as e:
+                    # 跳过解析失败的行
+                    print(f"[WARNING] Failed to parse MAC line: {line.strip()}, error: {e}")
+                    continue
 
         return mac_entries
 

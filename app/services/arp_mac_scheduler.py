@@ -15,7 +15,8 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text
+from sqlalchemy import text, func
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
@@ -141,24 +142,34 @@ class ARPMACScheduler:
                 return_exceptions=True
             )
 
-            # 处理 ARP 表
+            # 处理 ARP 表 - 使用 UPSERT 策略避免唯一键冲突
             if arp_table and not isinstance(arp_table, Exception):
-                # 清空并保存
-                self.db.query(ARPEntry).filter(
-                    ARPEntry.arp_device_id == device.id
-                ).delete()
+                batch_id = f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                now = datetime.now()
 
                 for entry in arp_table:
-                    arp_entry = ARPEntry(
+                    # 使用 MySQL INSERT ... ON DUPLICATE KEY UPDATE (UPSERT)
+                    stmt = mysql_insert(ARPEntry).values(
                         ip_address=entry['ip_address'],
                         mac_address=entry['mac_address'],
                         arp_device_id=device.id,
                         vlan_id=entry.get('vlan_id'),
                         arp_interface=entry.get('interface'),
-                        last_seen=datetime.now(),
-                        collection_batch_id=f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                        last_seen=now,
+                        collection_batch_id=batch_id,
+                        created_at=now,
+                        updated_at=now
                     )
-                    self.db.add(arp_entry)
+                    # 唯一键: uq_arp_current_ip_device (ip_address + arp_device_id)
+                    stmt = stmt.on_duplicate_key_update(
+                        mac_address=stmt.inserted.mac_address,
+                        vlan_id=stmt.inserted.vlan_id,
+                        arp_interface=stmt.inserted.arp_interface,
+                        last_seen=stmt.inserted.last_seen,
+                        collection_batch_id=stmt.inserted.collection_batch_id,
+                        updated_at=func.now()
+                    )
+                    self.db.execute(stmt)
 
                 device_stats['arp_success'] = True
                 device_stats['arp_entries_count'] = len(arp_table)
@@ -169,24 +180,35 @@ class ARPMACScheduler:
             else:
                 logger.warning(f"设备 {device.hostname} ARP 采集返回空结果")
 
-            # 处理 MAC 表
+            # 处理 MAC 表 - 使用 UPSERT 策略避免唯一键冲突
             if mac_table and not isinstance(mac_table, Exception):
-                # 清空并保存
-                self.db.query(MACAddressCurrent).filter(
-                    MACAddressCurrent.mac_device_id == device.id
-                ).delete()
+                batch_id = f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
+                now = datetime.now()
 
                 for entry in mac_table:
-                    mac_entry = MACAddressCurrent(
+                    # 使用 MySQL INSERT ... ON DUPLICATE KEY UPDATE (UPSERT)
+                    stmt = mysql_insert(MACAddressCurrent).values(
                         mac_address=entry['mac_address'],
                         mac_device_id=device.id,
                         vlan_id=entry.get('vlan_id'),
                         mac_interface=entry['interface'],
                         is_trunk=entry.get('is_trunk', False),
                         interface_description=entry.get('description'),
-                        last_seen=datetime.now()
+                        last_seen=now,
+                        collection_batch_id=batch_id,
+                        created_at=now,
+                        updated_at=now
                     )
-                    self.db.add(mac_entry)
+                    # 唯一键假设: (mac_address + mac_device_id + mac_interface)
+                    stmt = stmt.on_duplicate_key_update(
+                        vlan_id=stmt.inserted.vlan_id,
+                        is_trunk=stmt.inserted.is_trunk,
+                        interface_description=stmt.inserted.interface_description,
+                        last_seen=stmt.inserted.last_seen,
+                        collection_batch_id=stmt.inserted.collection_batch_id,
+                        updated_at=func.now()
+                    )
+                    self.db.execute(stmt)
 
                 device_stats['mac_success'] = True
                 device_stats['mac_entries_count'] = len(mac_table)
