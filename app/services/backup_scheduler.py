@@ -19,10 +19,10 @@ from app.models import get_db
 from app.models.models import BackupSchedule, Device, Configuration, BackupExecutionLog
 from app.services.netmiko_service import NetmikoService
 from app.services.git_service import GitService
+from app.services.config_collection_service import collect_device_config
 from datetime import datetime
 
-# 配置日志
-logging.basicConfig(level=logging.INFO)
+# 使用模块级 logger（logging.basicConfig 应在应用入口统一配置）
 logger = logging.getLogger(__name__)
 
 
@@ -202,17 +202,12 @@ class BackupSchedulerService:
                 logger.error(f"Device {device_id} not found")
                 return
 
-            # 导入需要的服务
-            from app.services.netmiko_service import NetmikoService
-            from app.services.git_service import GitService
-
-            # 创建服务实例
+            # 创建服务实例（使用顶部导入）
             netmiko_service = NetmikoService()
             git_service = GitService()
 
-            # 调用现有的配置采集函数
-            from app.api.endpoints.configurations import collect_config_from_device
-            result = await collect_config_from_device(device_id, db, netmiko_service, git_service)
+            # 调用配置采集服务函数（M6：不再直接调用 API 函数）
+            result = await collect_device_config(device_id, db, netmiko_service, git_service)
 
             # 计算执行时间
             execution_time = (datetime.now() - started_at).total_seconds()
@@ -258,6 +253,13 @@ class BackupSchedulerService:
         except Exception as e:
             error_message = str(e)
             logger.error(f"Backup failed for device {device_id}: {error_message}")
+
+            # 先回滚未完成的操作，确保 Session 状态干净
+            try:
+                db.rollback()
+                logger.debug(f"Session rolled back for backup task {task_id}")
+            except Exception as rollback_error:
+                logger.warning(f"Rollback failed for task {task_id}: {rollback_error}")
 
             # 查找对应的备份计划
             schedule = db.query(BackupSchedule).filter(
