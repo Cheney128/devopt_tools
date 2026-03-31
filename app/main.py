@@ -2,6 +2,8 @@
 主应用文件
 """
 import os
+import logging
+from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -12,11 +14,123 @@ from app.services.ip_location_scheduler import ip_location_scheduler
 from app.services.arp_mac_scheduler import arp_mac_scheduler
 from app.models import get_db
 
-# 创建FastAPI应用实例
+# 配置日志
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    FastAPI 应用生命周期管理
+
+    启动顺序：backup → ip_location → arp_mac
+    关闭顺序：arp_mac → ip_location → backup（反向）
+
+    包含完整的错误处理和回滚机制
+    """
+    # ========== Startup ==========
+    db = next(get_db())
+    startup_success = False
+
+    try:
+        # 打印数据库连接信息（隐藏密码）
+        db_url = os.getenv('DATABASE_URL', '未设置')
+        if db_url and '@' in db_url:
+            parts = db_url.split('@')
+            credentials = parts[0].split('://')[1] if '://' in parts[0] else parts[0]
+            masked_url = db_url.replace(credentials, '***:***')
+        else:
+            masked_url = db_url
+
+        logger.info(f"[Startup] DATABASE_URL: {masked_url}")
+        logger.info(f"[Startup] DEPLOY_MODE: {os.getenv('DEPLOY_MODE', '未设置')}")
+
+        # 1. 加载并启动 backup_scheduler
+        try:
+            backup_scheduler.load_schedules(db)
+            backup_scheduler.start()
+            logger.info("[Startup] Backup scheduler started")
+        except Exception as e:
+            logger.warning(f"Could not start backup scheduler: {e}")
+
+        # 2. 启动 ip_location_scheduler
+        try:
+            ip_location_scheduler.start()
+            logger.info("[Startup] IP Location scheduler started (interval: 10 minutes)")
+        except Exception as e:
+            logger.warning(f"Could not start IP location scheduler: {e}")
+
+        # 3. 启动 arp_mac_scheduler
+        try:
+            arp_mac_scheduler.start(db)
+            logger.info("[Startup] ARP/MAC scheduler started (interval: 30 minutes)")
+        except Exception as e:
+            logger.warning(f"Could not start ARP/MAC scheduler: {e}")
+
+        startup_success = True
+        logger.info("[Startup] All schedulers started successfully")
+
+        yield
+
+    except Exception as e:
+        # 错误处理：回滚已启动的调度器
+        logger.error(f"Scheduler startup failed: {e}")
+
+        # 反向关闭已启动的调度器
+        try:
+            arp_mac_scheduler.shutdown()
+            logger.info("[Startup Rollback] ARP/MAC scheduler shutdown")
+        except Exception as e2:
+            logger.error(f"[Startup Rollback] ARP/MAC scheduler shutdown failed: {e2}")
+
+        try:
+            ip_location_scheduler.shutdown()
+            logger.info("[Startup Rollback] IP Location scheduler shutdown")
+        except Exception as e2:
+            logger.error(f"[Startup Rollback] IP Location scheduler shutdown failed: {e2}")
+
+        try:
+            backup_scheduler.shutdown()
+            logger.info("[Startup Rollback] Backup scheduler shutdown")
+        except Exception as e2:
+            logger.error(f"[Startup Rollback] Backup scheduler shutdown failed: {e2}")
+
+        raise
+
+    finally:
+        # ========== Shutdown ==========
+        logger.info("[Shutdown] Shutting down all schedulers...")
+
+        # 反向关闭调度器（arp_mac → ip_location → backup）
+        try:
+            arp_mac_scheduler.shutdown()
+            logger.info("[Shutdown] ARP/MAC scheduler shutdown complete")
+        except Exception as e:
+            logger.error(f"[Shutdown] ARP/MAC scheduler shutdown failed: {e}")
+
+        try:
+            ip_location_scheduler.shutdown()
+            logger.info("[Shutdown] IP Location scheduler shutdown complete")
+        except Exception as e:
+            logger.error(f"[Shutdown] IP Location scheduler shutdown failed: {e}")
+
+        try:
+            backup_scheduler.shutdown()
+            logger.info("[Shutdown] Backup scheduler shutdown complete")
+        except Exception as e:
+            logger.error(f"[Shutdown] Backup scheduler shutdown failed: {e}")
+
+        # 关闭数据库 Session
+        db.close()
+        logger.info("[Shutdown] All schedulers shutdown complete, database session closed")
+
+
+# 创建FastAPI应用实例（使用 lifespan 管理生命周期）
 app = FastAPI(
     title=settings.PROJECT_NAME,
     version=settings.APP_VERSION,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan
 )
 
 # 配置CORS中间件
@@ -44,46 +158,6 @@ else:
 app.include_router(api_router, prefix=settings.API_V1_STR)
 
 
-@app.on_event("startup")
-async def startup_event():
-    """
-    应用启动事件
-    """
-    # 打印数据库连接信息（隐藏密码）
-    db_url = os.getenv('DATABASE_URL', '未设置')
-    # 隐藏密码部分
-    if db_url and '@' in db_url:
-        parts = db_url.split('@')
-        credentials = parts[0].split('://')[1] if '://' in parts[0] else parts[0]
-        masked_url = db_url.replace(credentials, '***:***')
-    else:
-        masked_url = db_url
-
-    print(f"[Startup] DATABASE_URL: {masked_url}")
-    print(f"[Startup] DEPLOY_MODE: {os.getenv('DEPLOY_MODE', '未设置')}")
-
-    # 加载备份任务
-    try:
-        db = next(get_db())
-        backup_scheduler.load_schedules(db)
-    except Exception as e:
-        print(f"Warning: Could not load backup schedules from database: {e}")
-        print("Application will continue without backup scheduler functionality.")
-
-    # 启动 IP 定位预计算调度器
-    try:
-        ip_location_scheduler.start()
-        print("[Startup] IP Location scheduler started (interval: 10 minutes)")
-    except Exception as e:
-        print(f"Warning: Could not start IP location scheduler: {e}")
-
-    # 启动 ARP/MAC 采集调度器
-    try:
-        db = next(get_db())
-        arp_mac_scheduler.start(db)
-        print("[Startup] ARP/MAC scheduler started (interval: 30 minutes)")
-    except Exception as e:
-        print(f"Warning: Could not start ARP/MAC scheduler: {e}")
 
 
 @app.get("/")

@@ -6,6 +6,13 @@ ARP+MAC 批量采集调度器
 1. 定时批量采集所有设备的 ARP 和 MAC 表
 2. 采集完成后自动触发 IP 定位预计算
 3. 支持事务保护，采集失败时不污染数据
+
+修复说明（M3）：
+- 将 BackgroundScheduler 替换为 AsyncIOScheduler（支持 async 任务）
+- 移除 _run_async 三层降级逻辑，直接使用 async 方法
+- 在任务内部重新获取 Session，不再复用全局 Session
+- 使用 asyncio.to_thread() 包装同步数据库操作
+- start() 方法不再需要 db 参数
 """
 
 import asyncio
@@ -15,11 +22,12 @@ from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy.orm import Session
-from sqlalchemy import text, func
+from sqlalchemy import func
 from sqlalchemy.dialects.mysql import insert as mysql_insert
-from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.interval import IntervalTrigger
 
+from app.models import SessionLocal
 from app.models.models import Device
 from app.models.ip_location_current import ARPEntry, MACAddressCurrent
 from app.services.netmiko_service import get_netmiko_service
@@ -31,28 +39,171 @@ logger = logging.getLogger(__name__)
 class ARPMACScheduler:
     """
     ARP+MAC 批量采集调度器
+
+    使用 AsyncIOScheduler：
+    - 支持 async 任务执行
+    - 与 FastAPI 事件循环兼容
+    - 避免 Session 生命周期问题
     """
 
-    def __init__(self, db: Optional[Session] = None, interval_minutes: int = 30):
+    def __init__(self, interval_minutes: int = 30):
         """
-        初始化调度器
+        初始化调度器（不启动）
 
         Args:
-            db: 数据库会话（可选，可在 start() 时传入）
             interval_minutes: 采集间隔（分钟），默认 30 分钟
+
+        注意：不在 __init__ 中启动调度器，应在 lifespan 中启动
         """
-        self.db = db
         self.interval_minutes = interval_minutes
-        self.scheduler = BackgroundScheduler()
+        self.scheduler = AsyncIOScheduler()
         self._is_running = False
         self._last_run: Optional[datetime] = None
         self._last_stats: Optional[dict] = None
         self._consecutive_failures: int = 0
-        self.netmiko = get_netmiko_service() if db else None
 
-    def collect_all_devices(self) -> dict:
+        logger.info("ARP/MAC scheduler initialized (AsyncIOScheduler, not started)")
+
+    def start(self, db: Optional[Session] = None):
         """
-        采集所有活跃设备的 ARP 和 MAC 表
+        启动调度器
+
+        Args:
+            db: 数据库会话（已废弃参数，保留用于兼容性）
+
+        注意：
+            不再使用 db 参数，任务执行时会在内部重新获取 Session
+        """
+        from app.config import settings
+
+        if not settings.ARP_MAC_COLLECTION_ENABLED:
+            logger.info("[ARP/MAC] 采集功能已禁用，跳过启动")
+            return
+
+        if self._is_running:
+            logger.warning("ARP/MAC 调度器已在运行中")
+            return
+
+        # 启动时立即采集（可配置）
+        if settings.ARP_MAC_COLLECTION_ON_STARTUP:
+            try:
+                logger.info("[ARP/MAC] 启动立即采集...")
+                # 直接调用 async 方法
+                asyncio.create_task(self._run_collection_async())
+                logger.info("[ARP/MAC] 启动立即采集已触发")
+            except Exception as e:
+                logger.error(f"[ARP/MAC] 启动立即采集失败：{e}", exc_info=True)
+
+        # 添加定时任务（使用 async 方法）
+        self.scheduler.add_job(
+            func=self._run_collection_async,  # 直接使用 async 方法
+            trigger=IntervalTrigger(minutes=self.interval_minutes),
+            id='arp_mac_collection',
+            name='ARP/MAC 自动采集',
+            replace_existing=True,
+            misfire_grace_time=600  # 允许 10 分钟的错过执行宽限期
+        )
+
+        self.scheduler.start()
+        self._is_running = True
+        logger.info(f"[ARP/MAC] 调度器已启动，间隔：{self.interval_minutes} 分钟")
+
+    def shutdown(self):
+        """
+        关闭调度器
+        """
+        if self._is_running:
+            self.scheduler.shutdown()
+            self._is_running = False
+            logger.info("ARP/MAC 调度器已关闭")
+
+    async def _run_collection_async(self):
+        """
+        执行采集（定时任务回调 - 异步版本）
+
+        在任务内部重新获取 Session，完成后关闭
+        """
+        logger.info("开始执行 ARP/MAC 采集...")
+
+        try:
+            stats = await self.collect_and_calculate_async()
+
+            self._last_run = datetime.now()
+            self._last_stats = stats
+
+            # 更新失败计数
+            collection = stats.get('collection', {})
+            arp_success = collection.get('arp_success', 0)
+            arp_failed = collection.get('arp_failed', 0)
+
+            if arp_success == 0 and arp_failed > 0:
+                self._consecutive_failures += 1
+                logger.warning(f"ARP/MAC 采集失败，连续失败次数：{self._consecutive_failures}")
+            else:
+                if self._consecutive_failures > 0:
+                    logger.info(f"ARP/MAC 采集恢复，之前连续失败 {self._consecutive_failures} 次")
+                self._consecutive_failures = 0
+
+            logger.info(f"ARP/MAC 采集完成：成功 {arp_success} 台，失败 {arp_failed} 台")
+
+        except Exception as e:
+            logger.error(f"ARP/MAC 采集异常：{e}", exc_info=True)
+            self._consecutive_failures += 1
+
+    async def collect_and_calculate_async(self) -> dict:
+        """
+        采集 ARP+MAC 并触发 IP 定位计算（异步版本）
+
+        在任务内部获取 Session，完成后关闭
+
+        Returns:
+            完整结果统计
+        """
+        logger.info("开始采集 + 计算流程")
+
+        # 在任务内部获取 Session
+        db = SessionLocal()
+
+        try:
+            # 步骤 1: 采集 ARP 和 MAC
+            collection_stats = await self.collect_all_devices_async(db)
+
+            if collection_stats.get('arp_success', 0) == 0:
+                logger.error("ARP 采集全部失败，跳过 IP 定位计算")
+                return {
+                    'collection': collection_stats,
+                    'calculation': {'error': 'ARP collection failed'}
+                }
+
+            # 步骤 2: 触发 IP 定位计算（使用 asyncio.to_thread 包装同步操作）
+            try:
+                calculator = get_ip_location_calculator(db)
+                calculation_stats = await asyncio.to_thread(calculator.calculate_batch)
+
+                logger.info(f"IP 定位计算完成：{calculation_stats}")
+
+                return {
+                    'collection': collection_stats,
+                    'calculation': calculation_stats
+                }
+            except Exception as e:
+                logger.error(f"IP 定位计算失败：{str(e)}")
+                return {
+                    'collection': collection_stats,
+                    'calculation': {'error': str(e)}
+                }
+
+        finally:
+            # 任务完成后关闭 Session
+            db.close()
+            logger.debug("Session closed for ARP/MAC collection task")
+
+    async def collect_all_devices_async(self, db: Session) -> dict:
+        """
+        异步采集所有活跃设备的 ARP 和 MAC 表
+
+        Args:
+            db: 数据库会话（由调用方提供）
 
         Returns:
             采集结果统计
@@ -60,10 +211,10 @@ class ARPMACScheduler:
         start_time = datetime.now()
         logger.info(f"开始批量采集 ARP 和 MAC 表，时间：{start_time}")
 
-        # 获取所有活跃设备
-        devices = self.db.query(Device).filter(
-            Device.status == 'active'
-        ).all()
+        # 获取所有活跃设备（使用 asyncio.to_thread 包装同步查询）
+        devices = await asyncio.to_thread(
+            lambda: db.query(Device).filter(Device.status == 'active').all()
+        )
 
         if not devices:
             logger.warning("没有活跃设备需要采集")
@@ -82,17 +233,20 @@ class ARPMACScheduler:
             'devices': []
         }
 
+        # 获取 netmiko 服务
+        netmiko = get_netmiko_service()
+
         # 逐个设备采集
         for device in devices:
-            device_stats = self._collect_device(device)
+            device_stats = await self._collect_device_async(device, db, netmiko)
             stats['devices'].append(device_stats)
-            
+
             if device_stats['arp_success']:
                 stats['arp_success'] += 1
                 stats['total_arp_entries'] += device_stats.get('arp_entries_count', 0)
             else:
                 stats['arp_failed'] += 1
-            
+
             if device_stats['mac_success']:
                 stats['mac_success'] += 1
                 stats['total_mac_entries'] += device_stats.get('mac_entries_count', 0)
@@ -108,16 +262,14 @@ class ARPMACScheduler:
         logger.info(f"批量采集完成：{stats}")
         return stats
 
-    async def _collect_device_async(self, device: Device) -> dict:
+    async def _collect_device_async(self, device: Device, db: Session, netmiko) -> dict:
         """
-        异步采集单个设备的 ARP 和 MAC 表（使用 asyncio.gather 并行采集）
-
-        注意：此方法在独立事件循环中执行，数据库 Session 操作在 asyncio.run() 内部完成。
-        SQLAlchemy Session 在同步上下文中创建，但在此异步方法内部仅执行同步数据库操作，
-        不涉及异步数据库驱动，因此线程安全。
+        异步采集单个设备的 ARP 和 MAC 表
 
         Args:
             device: 设备对象
+            db: 数据库会话
+            netmiko: Netmiko 服务实例
 
         Returns:
             采集结果字典
@@ -133,8 +285,8 @@ class ARPMACScheduler:
 
         try:
             # 并行采集 ARP 和 MAC 表
-            arp_task = self.netmiko.collect_arp_table(device)
-            mac_task = self.netmiko.collect_mac_table(device)
+            arp_task = netmiko.collect_arp_table(device)
+            mac_task = netmiko.collect_mac_table(device)
 
             arp_table, mac_table = await asyncio.gather(
                 arp_task,
@@ -169,7 +321,7 @@ class ARPMACScheduler:
                         collection_batch_id=stmt.inserted.collection_batch_id,
                         updated_at=func.now()
                     )
-                    self.db.execute(stmt)
+                    db.execute(stmt)
 
                 device_stats['arp_success'] = True
                 device_stats['arp_entries_count'] = len(arp_table)
@@ -208,7 +360,7 @@ class ARPMACScheduler:
                         collection_batch_id=stmt.inserted.collection_batch_id,
                         updated_at=func.now()
                     )
-                    self.db.execute(stmt)
+                    db.execute(stmt)
 
                 device_stats['mac_success'] = True
                 device_stats['mac_entries_count'] = len(mac_table)
@@ -220,220 +372,17 @@ class ARPMACScheduler:
             else:
                 logger.warning(f"设备 {device.hostname} MAC 采集返回空结果")
 
-            # 提交事务
-            self.db.commit()
+            # 提交事务（使用 asyncio.to_thread 包装同步操作）
+            await asyncio.to_thread(db.commit)
             logger.debug(f"设备 {device.hostname} 数据库事务提交成功")
 
         except Exception as e:
             logger.error(f"设备 {device.hostname} 采集失败：{str(e)}", exc_info=True)
-            self.db.rollback()
+            await asyncio.to_thread(db.rollback)
             logger.warning(f"设备 {device.hostname} 数据库事务已回滚")
             device_stats['error'] = str(e)
 
         return device_stats
-
-    def _run_async(self, coro):
-        """
-        异步方法运行辅助方法（支持三层降级策略）
-
-        此方法提供多层降级策略：
-        1. 优先使用 asyncio.run() 创建独立事件循环
-        2. 若检测到已有事件循环，尝试使用 nest_asyncio
-        3. 若 nest_asyncio 不可用，在新线程中运行
-
-        Args:
-            coro: 异步协程对象
-
-        Returns:
-            协程执行结果
-
-        Raises:
-            RuntimeError: 若所有方案均失败
-        """
-        try:
-            # 方案 1: 直接使用 asyncio.run()
-            return asyncio.run(coro)
-        except RuntimeError as e:
-            if "asyncio.run() cannot be called from a running event loop" in str(e):
-                logger.warning("检测到已有运行的事件循环，尝试降级方案")
-
-                # 方案 2: 使用 nest_asyncio
-                try:
-                    import nest_asyncio
-                    nest_asyncio.apply()
-                    loop = asyncio.get_running_loop()
-                    logger.debug("使用 nest_asyncio 处理嵌套事件循环")
-                    return loop.run_until_complete(coro)
-                except ImportError:
-                    logger.debug("nest_asyncio 未安装，使用线程降级方案")
-                except RuntimeError as thread_error:
-                    logger.warning(f"nest_asyncio 方案失败：{thread_error}")
-
-                # 方案 3: 在新线程中运行
-                import threading
-                result = None
-                exception = None
-
-                def run_in_thread():
-                    nonlocal result, exception
-                    try:
-                        result = asyncio.run(coro)
-                    except Exception as ex:
-                        exception = ex
-
-                thread = threading.Thread(target=run_in_thread, name="async_collector")
-                thread.start()
-                thread.join(timeout=60)  # 设置超时防止无限等待
-
-                if thread.is_alive():
-                    logger.error("异步采集线程超时（60秒），强制终止")
-                    raise RuntimeError("Async collection thread timeout")
-
-                if exception:
-                    raise exception
-
-                logger.debug("线程降级方案执行成功")
-                return result
-            else:
-                # 非嵌套事件循环的 RuntimeError，直接抛出
-                logger.error(f"asyncio.run() 执行失败：{e}", exc_info=True)
-                raise
-
-    def _collect_device(self, device: Device) -> dict:
-        """
-        采集单个设备的 ARP 和 MAC 表（同步包装方法）
-
-        此方法为调度器调用的同步入口，内部通过 asyncio.run() 创建独立事件循环执行异步采集。
-
-        Args:
-            device: 设备对象
-
-        Returns:
-            采集结果字典
-        """
-        return self._run_async(self._collect_device_async(device))
-
-    def collect_and_calculate(self) -> dict:
-        """
-        采集 ARP+MAC 并触发 IP 定位计算
-
-        Returns:
-            完整结果统计
-        """
-        logger.info("开始采集 + 计算流程")
-
-        # 步骤 1: 采集 ARP 和 MAC
-        collection_stats = self.collect_all_devices()
-
-        if collection_stats.get('arp_success', 0) == 0:
-            logger.error("ARP 采集全部失败，跳过 IP 定位计算")
-            return {
-                'collection': collection_stats,
-                'calculation': {'error': 'ARP collection failed'}
-            }
-
-        # 步骤 2: 触发 IP 定位计算
-        try:
-            calculator = get_ip_location_calculator(self.db)
-            calculation_stats = calculator.calculate_batch()
-            
-            logger.info(f"IP 定位计算完成：{calculation_stats}")
-            
-            return {
-                'collection': collection_stats,
-                'calculation': calculation_stats
-            }
-        except Exception as e:
-            logger.error(f"IP 定位计算失败：{str(e)}")
-            return {
-                'collection': collection_stats,
-                'calculation': {'error': str(e)}
-            }
-
-    def start(self, db: Session = None):
-        """
-        启动调度器
-        
-        Args:
-            db: 数据库会话（可选，如果初始化时已提供则不需要）
-        """
-        from app.config import settings
-        
-        if not settings.ARP_MAC_COLLECTION_ENABLED:
-            logger.info("[ARP/MAC] 采集功能已禁用，跳过启动")
-            return
-        
-        if self._is_running:
-            logger.warning("ARP/MAC 调度器已在运行中")
-            return
-        
-        # 如果提供了新的 db，更新它
-        if db:
-            self.db = db
-            self.netmiko = get_netmiko_service()
-        
-        # 启动时立即采集（可配置）
-        if settings.ARP_MAC_COLLECTION_ON_STARTUP:
-            try:
-                logger.info("[ARP/MAC] 启动立即采集...")
-                self._run_collection()
-                logger.info("[ARP/MAC] 启动立即采集完成")
-            except Exception as e:
-                logger.error(f"[ARP/MAC] 启动立即采集失败：{e}", exc_info=True)
-        
-        # 添加定时任务
-        self.scheduler.add_job(
-            func=self._run_collection,
-            trigger=IntervalTrigger(minutes=self.interval_minutes),
-            id='arp_mac_collection',
-            name='ARP/MAC 自动采集',
-            replace_existing=True,
-            misfire_grace_time=600  # 允许 10 分钟的错过执行宽限期
-        )
-        
-        self.scheduler.start()
-        self._is_running = True
-        logger.info(f"[ARP/MAC] 调度器已启动，间隔：{self.interval_minutes} 分钟")
-
-    def shutdown(self):
-        """
-        关闭调度器
-        """
-        if self._is_running:
-            self.scheduler.shutdown()
-            self._is_running = False
-            logger.info("ARP/MAC 调度器已关闭")
-
-    def _run_collection(self):
-        """
-        执行采集（定时任务回调）
-        """
-        logger.info("开始执行 ARP/MAC 采集...")
-        
-        try:
-            stats = self.collect_and_calculate()
-            
-            self._last_run = datetime.now()
-            self._last_stats = stats
-            
-            # 更新失败计数
-            collection = stats.get('collection', {})
-            arp_success = collection.get('arp_success', 0)
-            arp_failed = collection.get('arp_failed', 0)
-            
-            if arp_success == 0 and arp_failed > 0:
-                self._consecutive_failures += 1
-                logger.warning(f"ARP/MAC 采集失败，连续失败次数：{self._consecutive_failures}")
-            else:
-                if self._consecutive_failures > 0:
-                    logger.info(f"ARP/MAC 采集恢复，之前连续失败 {self._consecutive_failures} 次")
-                self._consecutive_failures = 0
-            
-            logger.info(f"ARP/MAC 采集完成：成功 {arp_success} 台，失败 {arp_failed} 台")
-            
-        except Exception as e:
-            logger.error(f"ARP/MAC 采集异常：{e}", exc_info=True)
-            self._consecutive_failures += 1
 
     def get_status(self) -> dict:
         """
@@ -444,7 +393,7 @@ class ARPMACScheduler:
         """
         jobs = self.scheduler.get_jobs() if self._is_running else []
         arp_job = next((j for j in jobs if j.id == 'arp_mac_collection'), None)
-        
+
         # 计算健康状态
         health_status = "healthy"
         if not self._is_running:
@@ -453,7 +402,7 @@ class ARPMACScheduler:
             health_status = "unhealthy"
         elif self._consecutive_failures >= 1:
             health_status = "degraded"
-        
+
         return {
             'scheduler': 'arp_mac',
             'is_running': self._is_running,
@@ -463,21 +412,9 @@ class ARPMACScheduler:
             'next_run': arp_job.next_run_time.isoformat() if arp_job and arp_job.next_run_time else None,
             'consecutive_failures': self._consecutive_failures,
             'health_status': health_status,
+            'scheduler_type': 'AsyncIOScheduler',  # 新增：标识调度器类型
         }
 
 
-def get_arp_mac_scheduler(db: Session) -> ARPMACScheduler:
-    """
-    获取 ARP+MAC 调度器实例
-
-    Args:
-        db: 数据库会话
-
-    Returns:
-        调度器实例
-    """
-    return ARPMACScheduler(db)
-
-
-# 创建全局调度器实例（db 将在 start() 时传入）
-arp_mac_scheduler = ARPMACScheduler(db=None, interval_minutes=30)
+# 创建全局调度器实例（不再传 db）
+arp_mac_scheduler = ARPMACScheduler(interval_minutes=30)
