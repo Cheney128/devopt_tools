@@ -10,6 +10,9 @@ from sqlalchemy.orm import Session
 
 from app.models.models import Device
 from app.models.backup_task import BackupTask, BackupTaskStatus
+from app.services.config_collection_service import collect_device_config
+from app.services.netmiko_service import NetmikoService
+from app.services.git_service import GitService
 
 logger = logging.getLogger(__name__)
 
@@ -153,10 +156,12 @@ class BackupExecutor:
             }
         
         start_time = datetime.now()
-        
+
         try:
-            from app.api.endpoints.configurations import collect_config_from_device
-            result = await collect_config_from_device(device_id, db)
+            # 创建服务实例并调用配置采集服务函数（M6：不再调用 API 函数）
+            netmiko_service = NetmikoService()
+            git_service = GitService()
+            result = await collect_device_config(device_id, db, netmiko_service, git_service)
             
             execution_time = (datetime.now() - start_time).total_seconds()
             
