@@ -1,14 +1,24 @@
 """
 SSH连接池管理模块
 提供高效的SSH连接管理功能，包括连接创建、获取、释放和回收
+
+修复说明：
+- 使用懒初始化模式，避免模块导入时创建 asyncio 对象
+- 在 __init__ 中不调用 asyncio.Lock() 和 asyncio.create_task()
+- 在 _ensure_initialized() 方法中延迟创建这些对象
+- 所有使用 _lock 和 _cleanup_task 的方法都需要调用 _ensure_initialized()
 """
 
 import asyncio
+import logging
 import time
 from typing import Dict, Optional, Any, List
 from datetime import datetime, timedelta
 from app.models.models import Device
 from app.services.netmiko_service import get_netmiko_service
+
+# 配置日志
+logger = logging.getLogger(__name__)
 
 
 class SSHConnection:
@@ -54,59 +64,116 @@ class SSHConnectionPool:
     """
     SSH连接池管理类
     提供高效的SSH连接管理功能
+
+    使用懒初始化模式：
+    - __init__ 中不创建 asyncio 对象（Lock、Task）
+    - _ensure_initialized() 中延迟创建
+    - 所有使用 asyncio 对象的方法调用 _ensure_initialized()
     """
-    
+
     def __init__(self, max_connections: int = 10, connection_timeout: int = 300):
         """
-        初始化SSH连接池
-        
+        初始化SSH连接池（懒初始化模式）
+
         Args:
             max_connections: 最大连接数
             connection_timeout: 连接超时时间（秒）
+
+        注意：
+            不在 __init__ 中创建 asyncio.Lock() 和 asyncio.create_task()
+            因为模块导入时可能没有运行的事件循环
         """
         self.max_connections = max_connections
         self.connection_timeout = connection_timeout
         self.connections: Dict[int, List[SSHConnection]] = {}
-        self.lock = asyncio.Lock()
+
+        # 懒初始化属性：延迟创建 asyncio 对象
+        self._lock: Optional[asyncio.Lock] = None
+        self._cleanup_task: Optional[asyncio.Task] = None
+        self._initialized: bool = False
+
+        # 非 asyncio 对象可以在 __init__ 中创建
         self.netmiko_service = get_netmiko_service()
-        self.cleanup_task = asyncio.create_task(self._periodic_cleanup())
+
+        logger.debug("SSHConnectionPool instance created (lazy initialization)")
+
+    def _ensure_initialized(self):
+        """
+        确保 asyncio 对象已初始化
+
+        在首次使用 _lock 或 _cleanup_task 时调用此方法
+        必须在有运行事件循环的环境中调用
+
+        此方法会：
+        1. 创建 asyncio.Lock
+        2. 创建定期清理任务 asyncio.Task
+        3. 设置 _initialized 标志为 True
+        """
+        if self._initialized:
+            return
+
+        logger.info("Initializing SSH connection pool asyncio objects")
+        self._lock = asyncio.Lock()
+        self._cleanup_task = asyncio.create_task(self._periodic_cleanup())
+        self._initialized = True
+        logger.info("SSH connection pool initialized successfully")
 
     async def _periodic_cleanup(self):
-        """定期清理过期连接"""
+        """
+        定期清理过期连接
+
+        每分钟执行一次清理，检查所有连接是否过期
+        """
         while True:
             await asyncio.sleep(60)  # 每分钟清理一次
-            await self._cleanup_expired_connections()
+            try:
+                await self._cleanup_expired_connections()
+            except Exception as e:
+                logger.error(f"Periodic cleanup error: {e}")
 
     async def _cleanup_expired_connections(self):
-        """清理过期连接"""
-        async with self.lock:
+        """
+        清理过期连接
+
+        检查所有连接是否过期，关闭并移除过期连接
+        """
+        # 调用 _ensure_initialized 确保 _lock 已创建
+        self._ensure_initialized()
+
+        async with self._lock:
             for device_id, conn_list in list(self.connections.items()):
                 expired_conns = [conn for conn in conn_list if conn.is_expired(self.connection_timeout)]
                 for conn in expired_conns:
                     conn.close()
                     conn_list.remove(conn)
-                
+                    logger.debug(f"Closed expired connection for device {device_id}")
+
                 # 如果设备的连接列表为空，从字典中移除
                 if not conn_list:
                     del self.connections[device_id]
+                    logger.debug(f"Removed empty connection list for device {device_id}")
 
     async def get_connection(self, device: Device) -> Optional[SSHConnection]:
         """
         获取设备的SSH连接
-        
+
         Args:
             device: 设备对象
-            
+
         Returns:
             Optional[SSHConnection]: SSH连接对象，失败返回None
         """
-        async with self.lock:
+        # 调用 _ensure_initialized 确保 _lock 已创建
+        self._ensure_initialized()
+
+        async with self._lock:
             # 检查是否已有可用连接
             if device.id in self.connections:
                 # 查找活跃的连接
                 for conn in self.connections[device.id]:
                     if conn.is_active and not conn.is_expired(self.connection_timeout):
                         conn.mark_used()
+                        logger.debug(f"Reusing existing connection for device {device.hostname}")
                         return conn
 
             # 如果没有可用连接，且连接数未达到上限，创建新连接
@@ -118,57 +185,76 @@ class SSHConnectionPool:
                     if connection:
                         ssh_conn = SSHConnection(device, connection)
                         ssh_conn.mark_used()
-                        
+
                         # 添加到连接池
                         if device.id not in self.connections:
                             self.connections[device.id] = []
                         self.connections[device.id].append(ssh_conn)
-                        
+
+                        logger.info(f"Created new connection for device {device.hostname}")
                         return ssh_conn
-                except Exception:
-                    pass
-        
+                except Exception as e:
+                    logger.error(f"Failed to create connection for device {device.hostname}: {e}")
+
         return None
 
     async def release_connection(self, connection: SSHConnection):
         """
         释放连接回连接池
-        
+
         Args:
             connection: 要释放的连接
         """
         # 连接不需要显式释放，只需要标记为已使用
         connection.mark_used()
+        logger.debug(f"Released connection for device {connection.device.hostname}")
 
     async def close_connection(self, connection: SSHConnection):
         """
         关闭并移除连接
-        
+
         Args:
             connection: 要关闭的连接
         """
-        async with self.lock:
+        # 调用 _ensure_initialized 确保 _lock 已创建
+        self._ensure_initialized()
+
+        async with self._lock:
             connection.close()
             if connection.device.id in self.connections:
                 if connection in self.connections[connection.device.id]:
                     self.connections[connection.device.id].remove(connection)
-                
+                    logger.info(f"Closed connection for device {connection.device.hostname}")
+
                 # 如果设备的连接列表为空，从字典中移除
                 if not self.connections[connection.device.id]:
                     del self.connections[connection.device.id]
+                    logger.debug(f"Removed empty connection list for device {connection.device.id}")
 
     async def close_all_connections(self):
         """
         关闭所有连接
+
+        清理所有活跃连接，取消清理任务
         """
-        async with self.lock:
+        # 调用 _ensure_initialized 确保 _lock 和 _cleanup_task 已创建
+        self._ensure_initialized()
+
+        # 取消清理任务
+        if self._cleanup_task:
+            self._cleanup_task.cancel()
+            try:
+                await self._cleanup_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Cleanup task cancelled")
+
+        async with self._lock:
             for conn_list in self.connections.values():
                 for conn in conn_list:
                     conn.close()
             self.connections.clear()
-        
-        # 取消清理任务
-        self.cleanup_task.cancel()
+            logger.info("All connections closed")
 
     def get_pool_stats(self) -> Dict[str, Any]:
         """
