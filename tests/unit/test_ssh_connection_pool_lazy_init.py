@@ -297,5 +297,59 @@ class TestSSHConnectionPoolEnsureInitializedMethod:
         assert first_initialized == second_initialized == True
 
 
+class TestSSHConnectionCloseLogsException:
+    """测试 SSHConnection.close() 异常时记录日志（I4 修复验证）"""
+
+    def test_ssh_connection_close_logs_exception(self):
+        """
+        验证 SSHConnection.close() 异常时记录日志
+
+        测试步骤：
+        1. Mock connection.disconnect() 抛出异常
+        2. 调用 close()
+        3. 验证 logger.warning 被调用
+        4. 验证 is_active 设置为 False
+        """
+        from app.services.ssh_connection_pool import SSHConnection
+
+        device = MagicMock(hostname="test-device")
+        connection = MagicMock()
+        connection.disconnect.side_effect = Exception("Connection error")
+
+        ssh_conn = SSHConnection(device, connection)
+
+        with patch('app.services.ssh_connection_pool.logger') as mock_logger:
+            ssh_conn.close()
+
+            # 验证日志被记录
+            assert mock_logger.warning.called, "logger.warning 应被调用"
+            call_args = mock_logger.warning.call_args[0][0]
+            assert "test-device" in call_args, "日志应包含设备名称"
+
+            # 验证 is_active 为 False
+            assert ssh_conn.is_active is False, "is_active 应设置为 False"
+
+    def test_ssh_connection_close_success_no_warning(self):
+        """
+        验证 SSHConnection.close() 成功时不记录警告日志
+        """
+        from app.services.ssh_connection_pool import SSHConnection
+
+        device = MagicMock(hostname="test-device")
+        connection = MagicMock()
+        # disconnect 成功
+
+        ssh_conn = SSHConnection(device, connection)
+
+        with patch('app.services.ssh_connection_pool.logger') as mock_logger:
+            ssh_conn.close()
+
+            # 验证 warning 不被调用
+            assert not mock_logger.warning.called, "成功关闭不应记录 warning"
+
+            # 验证 is_active 为 False
+            assert ssh_conn.is_active is False, "is_active 应设置为 False"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])

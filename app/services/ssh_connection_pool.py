@@ -56,8 +56,10 @@ class SSHConnection:
             try:
                 self.connection.disconnect()
                 self.is_active = False
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(f"Failed to close SSH connection for device {self.device.hostname}: {e}")
+                # 连接关闭失败时仍标记为非活跃，避免重复尝试
+                self.is_active = False
 
 
 class SSHConnectionPool:
@@ -108,6 +110,10 @@ class SSHConnectionPool:
         1. 创建 asyncio.Lock
         2. 创建定期清理任务 asyncio.Task
         3. 设置 _initialized 标志为 True
+
+        Raises:
+            RuntimeError: 如果在没有运行事件循环的环境中调用，
+                          asyncio.Lock() 和 asyncio.create_task() 会抛出此异常
         """
         if self._initialized:
             return

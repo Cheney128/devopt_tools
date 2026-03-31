@@ -388,5 +388,59 @@ class TestBackupSchedulerLoadSchedulesNoDb:
                 assert len(args) == 1, f"add_schedule 应只接受 1 个参数，实际为: {len(args)}"
 
 
+class TestBackupSchedulerRollbackOnException:
+    """测试异常发生时调用 rollback（I2 修复验证）"""
+
+    @pytest.mark.asyncio
+    async def test_execute_backup_rollback_on_exception(self):
+        """
+        验证异常发生时调用 rollback
+
+        测试步骤：
+        1. Mock db.rollback() 方法
+        2. 模拟执行过程中的异常
+        3. 验证 rollback 被调用
+        4. 验证失败日志仍能正常记录
+        """
+        from app.services.backup_scheduler import BackupSchedulerService
+
+        scheduler = BackupSchedulerService()
+
+        # Mock get_db 返回一个 Session
+        mock_db = MagicMock()
+        mock_db.close = MagicMock()
+        mock_db.rollback = MagicMock()
+
+        # Mock collect_config_from_device 抛出异常
+        with patch('app.services.backup_scheduler.collect_config_from_device', new_callable=AsyncMock) as mock_collect:
+            mock_collect.side_effect = Exception("Simulated error")
+
+            # Mock get_db 生成器
+            def mock_get_db_gen():
+                yield mock_db
+
+            with patch('app.services.backup_scheduler.get_db', mock_get_db_gen):
+                # Mock BackupExecutionLog
+                with patch('app.services.backup_scheduler.BackupExecutionLog') as mock_log:
+                    mock_log_instance = MagicMock()
+                    mock_log.return_value = mock_log_instance
+
+                    # Mock 数据库查询
+                    mock_db.query.return_value.filter.return_value.first.return_value = None
+
+                    # 调用 _execute_backup
+                    await scheduler._execute_backup(device_id=1)
+
+                    # 验证 rollback 被调用
+                    assert mock_db.rollback.called, "rollback 应在异常时被调用"
+
+                    # 验证失败日志被记录
+                    assert mock_db.add.called, "失败日志应被添加"
+                    assert mock_db.commit.called, "失败日志应被提交"
+
+                    # 验证 Session 已关闭
+                    assert mock_db.close.called, "Session 应在 finally 中关闭"
+
+
 if __name__ == '__main__':
     pytest.main([__file__, '-v'])
