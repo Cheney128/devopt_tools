@@ -15,7 +15,6 @@ except ImportError:
     ConnectHandler = None
 
 from app.models.models import Device
-from app.config import settings
 
 
 class NetmikoService:
@@ -283,19 +282,117 @@ class NetmikoService:
             }
         elif vendor_lower in ['cisco', 'ruijie', '锐捷']:
             return {
-                'user_view': r'[\w\-]+#',            # 特权模式: hostname#
-                'config_view': r'[\w\-]+\(config[^)]*\)#', # 配置模式: hostname(config)#
-                'any_view': r'[\w\-]+(?:\(config[^)]*\))?[#>]'  # 支持配置模式
+                'user_view': r'.*#',            # 特权模式: hostname#
+                'config_view': r'\(config.*\)#', # 配置模式: hostname(config)#
+                'any_view': r'.*[#>]'
             }
         else:
             # 默认使用Cisco风格
             return {
-                'user_view': r'[\w\-]+#',
-                'config_view': r'[\w\-]+\(config[^)]*\)#',
-                'any_view': r'[\w\-]+(?:\(config[^)]*\))?[#>]'
+                'user_view': r'.*#',
+                'config_view': r'\(config.*\)#',
+                'any_view': r'.*[#>]'
             }
 
-    async def execute_command(self, device: Device, command: str, expect_string: Optional[str] = None, read_timeout: int = 20, use_expect_string: Optional[bool] = None) -> Optional[str]:
+    def _handle_pagination(self, conn, output: str, max_pages: int = 50) -> str:
+        """
+        处理华为/H3C 设备分页输出（同步方法，由异步包装调用）
+
+        修复问题: P009 - 华为 S1730S 设备分页输出导致 ReadTimeout
+
+        Args:
+            conn: Netmiko 连接对象
+            output: 初始输出（包含 ---- More ---- 分页标记）
+            max_pages: 最大分页次数，防止无限循环
+
+        Returns:
+            完整输出（已清理分页标记）
+        """
+        import time
+
+        full_output = output
+
+        # 评审建议 P0: 添加异常处理防止分页异常影响主流程
+        try:
+            for _ in range(max_pages):
+                if '---- More ----' not in full_output:
+                    break
+                # 发送空格继续翻页
+                conn.write_channel(" ")
+                time.sleep(0.3)
+                full_output += conn.read_channel()
+        except Exception as e:
+            # 分页异常时记录警告但返回已获取的输出
+            print(f"[WARNING] Pagination handling error: {e}")
+
+        # 清理分页标记
+        return re.sub(r'\s*---- More ----\s*', '\n', full_output)
+
+    async def _send_command_with_pagination(
+        self,
+        connection,
+        command: str,
+        read_timeout: int = 20,
+        delay_factor: float = 2.0,
+        cleanup_prompt: bool = True
+    ) -> str:
+        """
+        使用 send_command_timing 执行命令并处理分页（异步版本）
+
+        修复问题: P009 - 华为 S1730S 设备 Netmiko ReadTimeout
+
+        技术方案:
+        1. 使用 send_command_timing 绕过提示符检测问题
+        2. 手动处理分页输出（发送空格继续）
+        3. 清理分页标记 ---- More ----
+        4. prompt 状态清理防止后续命令失败
+
+        Args:
+            connection: Netmiko 连接对象
+            command: 要执行的命令
+            read_timeout: 超时时间（秒）
+            delay_factor: 延迟因子，用于 send_command_timing
+            cleanup_prompt: 是否清理 prompt 状态（评审建议 P1 可选化）
+
+        Returns:
+            命令输出（已清理分页标记）
+        """
+        # 评审建议 P1: 日志增强
+        print(f"[INFO] Using send_command_timing for pagination-prone device, command: {command}")
+
+        # 使用 send_command_timing（基于时间判断，不依赖正则匹配）
+        output = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: connection.send_command_timing(
+                command,
+                delay_factor=delay_factor,
+                max_loops=read_timeout * 10  # max_loops = read_timeout * 10
+            )
+        )
+
+        # 分页处理（包装为异步执行，防止阻塞事件循环）
+        if '---- More ----' in output:
+            print(f"[INFO] Pagination detected, handling...")
+            output = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._handle_pagination(connection, output)
+            )
+
+        # 评审建议 P0 + P1: prompt 状态清理（可选化 + 异常处理）
+        if cleanup_prompt:
+            try:
+                connection.write_channel("\n")
+                await asyncio.sleep(0.2)
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: connection.read_channel()
+                )
+            except Exception as e:
+                print(f"[WARNING] Prompt cleanup failed: {e}")
+
+        return output
+
+    async def execute_command(self, device: Device, command: str, expect_string: Optional[str] = None, read_timeout: int = 20) -> Optional[str]:
         """
         在设备上执行命令（带增强的错误处理）
 
@@ -304,21 +401,14 @@ class NetmikoService:
             command: 要执行的命令
             expect_string: 预期的提示符字符串，用于判断命令执行完成
             read_timeout: 命令执行超时时间（秒）
-            use_expect_string: 是否使用expect_string（回滚开关），None时从配置读取
 
         Returns:
             命令输出，失败返回None
         """
         from app.services.ssh_connection_pool import get_ssh_connection_pool
 
-        # 回滚开关逻辑说明:
-        # NETMIKO_USE_OPTIMIZED_METHOD=True  → use_expect_string=False (推荐方案: expect_string=None)
-        # NETMIKO_USE_OPTIMIZED_METHOD=False → use_expect_string=True  (备选方案: vendor-specific expect_string)
-        if use_expect_string is None:
-            use_expect_string = not settings.NETMIKO_USE_OPTIMIZED_METHOD
-
         print(f"[INFO] Executing command '{command}' on device {device.hostname} ({device.ip_address})")
-        print(f"[INFO] Command timeout: {read_timeout}s, Expect string: {expect_string}, Use expect_string: {use_expect_string}")
+        print(f"[INFO] Command timeout: {read_timeout}s, Expect string: {expect_string}")
 
         ssh_conn_pool = get_ssh_connection_pool()
         connection = None
@@ -355,20 +445,25 @@ class NetmikoService:
             # 判断是否为配置命令
             is_config_cmd = self._is_config_command(command, device.vendor)
 
+            # 评审建议 P0: 添加分页判断（华为/H3C 查询命令）
+            vendor_lower = device.vendor.lower().strip() if device.vendor else ""
+            needs_pagination = vendor_lower in ['huawei', 'h3c', '华为', '华三']
+
             try:
-                # 如果用户提供了expect_string且启用use_expect_string，使用用户提供的
-                if expect_string and use_expect_string:
+                # 评审建议 P0: 分支优先级明确
+                # 优先级：分页查询 > expect_string > 配置命令 > 默认查询
+                if needs_pagination and not is_config_cmd:
+                    # 华为/H3C 查询命令：使用 send_command_timing + 分页处理
+                    print(f"[INFO] Huawei/H3C query command detected, using send_command_timing with pagination")
+                    output = await self._send_command_with_pagination(
+                        connection, command, read_timeout
+                    )
+                elif expect_string:
+                    # 如果用户提供了expect_string，使用用户提供的
                     print(f"[INFO] Sending command with user-provided expect_string: {expect_string}")
                     output = await loop.run_in_executor(
                         None,
                         lambda: connection.send_command(command, expect_string=expect_string, read_timeout=read_timeout)
-                    )
-                elif expect_string and not use_expect_string:
-                    # 回滚模式：忽略expect_string，使用默认方式
-                    print(f"[INFO] Rollback mode: ignoring expect_string, using default send_command")
-                    output = await loop.run_in_executor(
-                        None,
-                        lambda: connection.send_command(command, read_timeout=read_timeout)
                     )
                 elif is_config_cmd:
                     # 对于配置命令，使用send_config_set方法
@@ -395,7 +490,7 @@ class NetmikoService:
                             )
                         )
                 else:
-                    # 普通查询命令，使用默认方式
+                    # 其他厂商查询命令，使用默认方式
                     print(f"[INFO] Sending command without expect_string (query command)")
                     output = await loop.run_in_executor(
                         None,
@@ -652,108 +747,6 @@ class NetmikoService:
 
         return None
 
-    def _parse_arp_table(self, output: str, vendor: str) -> List[Dict[str, Any]]:
-        """
-        解析 ARP 表输出（优化版）
-
-        修复问题:
-        1. vendor 大小写处理
-        2. MAC 地址标准化
-        3. IP/MAC 格式验证
-        4. 调试日志
-
-        Args:
-            output: 命令输出
-            vendor: 设备厂商
-
-        Returns:
-            ARP 条目列表
-        """
-        from loguru import logger
-
-        arp_entries = []
-        lines = output.strip().split('\n')
-
-        # 1. vendor 小写转换
-        vendor_lower = vendor.lower().strip()
-        logger.debug(f"[ARP 解析] vendor={vendor}, vendor_lower={vendor_lower}")
-
-        # 2. 表头识别
-        start_index = 0
-        for i, line in enumerate(lines):
-            if 'IP' in line.upper() and 'MAC' in line.upper():
-                start_index = i + 1
-                logger.debug(f"[ARP 解析] 表头识别在第 {i} 行：{line.strip()}")
-                break
-
-        # 3. 验证正则
-        IP_PATTERN = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
-        MAC_PATTERN = re.compile(r'^[0-9A-Fa-f]{2}([-:.]?[0-9A-Fa-f]{2}){5}$')
-
-        # 4. 数据行解析
-        for line in lines[start_index:]:
-            if not line.strip():
-                continue
-            if '---' in line or 'Total:' in line or 'Type:' in line:
-                continue
-
-            parts = line.split()
-            if len(parts) < 4:
-                logger.warning(f"[ARP 解析] 行字段不足：{line.strip()}")
-                continue
-
-            try:
-                if vendor_lower in ['huawei', 'h3c']:
-                    # Huawei/H3C 格式：IP MAC VLAN Interface [Aging] [Type]
-                    ip = parts[0]
-                    mac_raw = parts[1]
-                    vlan = parts[2] if parts[2].isdigit() else None
-                    interface = parts[3]
-
-                    # 数据验证
-                    if not IP_PATTERN.match(ip):
-                        logger.warning(f"[ARP 解析] 无效 IP: {ip}, 跳过")
-                        continue
-                    if not MAC_PATTERN.match(mac_raw):
-                        logger.warning(f"[ARP 解析] 无效 MAC: {mac_raw}, 跳过")
-                        continue
-
-                    entry = {
-                        'ip_address': ip,
-                        'mac_address': self._normalize_mac_address(mac_raw),
-                        'vlan_id': int(vlan) if vlan else None,
-                        'interface': interface
-                    }
-                else:  # cisco
-                    # Cisco 格式：Protocol IP Age MAC Addr Type Interface
-                    ip = parts[1]
-                    mac_raw = parts[3]
-
-                    # 数据验证
-                    if not IP_PATTERN.match(ip):
-                        logger.warning(f"[ARP 解析] 无效 IP: {ip}, 跳过")
-                        continue
-                    if not MAC_PATTERN.match(mac_raw):
-                        logger.warning(f"[ARP 解析] 无效 MAC: {mac_raw}, 跳过")
-                        continue
-
-                    entry = {
-                        'ip_address': ip,
-                        'mac_address': self._normalize_mac_address(mac_raw),
-                        'vlan_id': None,
-                        'interface': parts[5] if len(parts) > 5 else parts[4]
-                    }
-
-                arp_entries.append(entry)
-                logger.debug(f"[ARP 解析] 成功解析：IP={entry['ip_address']}, MAC={entry['mac_address']}")
-
-            except (ValueError, IndexError) as e:
-                logger.warning(f"[ARP 解析] 解析失败：{line.strip()}, error={e}")
-                continue
-
-        logger.info(f"[ARP 解析] vendor={vendor_lower}, 共解析 {len(arp_entries)} 条有效记录")
-        return arp_entries
-
     def parse_mac_table(self, output: str, vendor: str) -> List[Dict[str, Any]]:
         """
         解析MAC地址表
@@ -813,53 +806,30 @@ class NetmikoService:
         return mac_entries
 
     def _parse_huawei_mac_table(self, output: str) -> List[Dict[str, Any]]:
-        """
-        解析华为/H3C MAC地址表（空格分隔简单解析）
-
-        华为/H3C MAC地址表格式：
-        MAC Address    VLAN/VSI    Learned-From        Type
-        0011-2233-4455 1/-         GE1/0/1             dynamic
-        """
+        """解析华为/H3C MAC地址表"""
         mac_entries = []
-        lines = output.strip().split('\n')
 
+        # 华为/H3C MAC地址表格式：
+        # MAC Address    VLAN/VSI    Learned-From        Type
+        # 0011-2233-4455 1/-         GE1/0/1             dynamic
+
+        lines = output.strip().split('\n')
         for line in lines:
             # 跳过标题行和空行
-            if not line.strip():
-                continue
-            if 'MAC Address' in line or 'MAC地址' in line:
-                continue
-            if re.match(r'^[=\-]+', line):  # 跳过分隔线
+            if not line.strip() or re.match(r'MAC\s+Address', line, re.IGNORECASE):
                 continue
 
-            # 使用空格分隔解析
-            parts = line.split()
-            if len(parts) >= 4:
-                try:
-                    # 华为格式: MAC VLAN/VSI 接口 类型
-                    mac_raw = parts[0]
-                    vlan_part = parts[1]  # 格式: "1/-" 或 "10/100" 或 "-"
-
-                    # 提取 VLAN 号（格式处理）
-                    vlan_id = None
-                    if vlan_part and vlan_part != '-':
-                        if '/' in vlan_part:
-                            vlan_str = vlan_part.split('/')[0]
-                            if vlan_str.isdigit():
-                                vlan_id = int(vlan_str)
-                        elif vlan_part.isdigit():
-                            vlan_id = int(vlan_part)
-
-                    mac_entries.append({
-                        "mac_address": mac_raw.upper(),
-                        "vlan_id": vlan_id,
-                        "interface": parts[2].strip(),
-                        "address_type": parts[3].lower() if len(parts) > 3 else "dynamic"
-                    })
-                except (ValueError, IndexError) as e:
-                    # 跳过解析失败的行
-                    print(f"[WARNING] Failed to parse MAC line: {line.strip()}, error: {e}")
-                    continue
+            # 匹配MAC地址行 - 使用更灵活的正则（支持GE1/0/1格式）
+            # 华为格式：MAC地址 VLAN/VSI 接口 类型
+            match = re.search(r'([0-9A-Fa-f-]+)\s*(?:[/-]\s*(\d+)/\S*\s*(\S+))', line)
+            if match:
+                mac_raw = match.group(1)
+                mac_entries.append({
+                    "mac_address": mac_raw.upper(),
+                    "vlan_id": int(match.group(2)),
+                    "interface": match.group(3).strip(),
+                    "address_type": match.group(4).lower()
+                })
 
         return mac_entries
 
@@ -869,27 +839,24 @@ class NetmikoService:
 
     def _normalize_mac_address(self, mac: str) -> str:
         """
-        标准化 MAC 地址为冒号分隔格式 (xx:xx:xx:xx:xx:xx)
-
-        支持输入格式:
-        - xxxx-xxxx-xxxx (Huawei/H3C)
-        - xxxx.xxxx.xxxx (Cisco)
-        - xx:xx:xx:xx:xx:xx (标准格式)
+        标准化MAC地址格式为 xx:xx:xx:xx:xx:xx
+        保留原始格式（Cisco用点分隔，华为用横线分隔）
 
         Args:
-            mac: 原始 MAC 地址字符串
+            mac: 原始MAC地址字符串
 
         Returns:
-            标准化后的 MAC 地址 (xx:xx:xx:xx:xx:xx)
+            标准化后的MAC地址
         """
-        from loguru import logger
-
+        # 移除所有分隔符并转为大写
         mac_clean = re.sub(r'[^0-9A-Fa-f]', '', mac.upper())
-        if len(mac_clean) != 12:
-            logger.warning(f'[MAC 标准化] 无效 MAC: {mac}')
-            return mac.upper()
-        return ':'.join([mac_clean[i:i+2] for i in range(0, 12, 2)])
 
+        # 如果已经是12位十六进制，保持原始格式（添加原始分隔符）
+        if len(mac_clean) == 12:
+            return mac
+
+        # 如果格式不正确，尝试添加冒号分隔符
+        return mac
 
     def parse_interfaces_info(self, interfaces_output: str, status_output: Optional[str], vendor: str) -> List[Dict[str, Any]]:
         """
@@ -1213,102 +1180,6 @@ class NetmikoService:
                 except:
                     pass
 
-
-    async def collect_arp_table(self, device: Device) -> Optional[List[Dict[str, Any]]]:
-        """
-        采集设备 ARP 表
-
-        Args:
-            device: 设备对象
-
-        Returns:
-            ARP 表条目列表，每个条目包含：ip_address, mac_address, vlan_id, interface
-        """
-        if not device.username or not device.password:
-            print(f"Device {device.hostname} missing credentials")
-            return None
-
-        # 根据设备厂商选择命令和超时时间
-        # 最终方案：使用 expect_string=None，让 Netmiko 自动检测提示符
-        # 保留较长的 read_timeout 以应对网络延迟和大型 ARP 表
-        if device.vendor == "huawei":
-            command = "display arp"
-            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT  # ARP表采集可能较慢，使用配置值(默认65s)
-        elif device.vendor == "h3c":
-            command = "display arp"
-            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT
-        elif device.vendor == "cisco":
-            command = "show ip arp"
-            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT
-        elif device.vendor == "ruijie":
-            command = "show ip arp"
-            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT
-        else:
-            command = "display arp"  # 默认使用华为命令
-            read_timeout = settings.NETMIKO_ARP_TABLE_TIMEOUT
-
-        # 使用 expect_string=None，让 Netmiko 自动检测提示符
-        output = await self.execute_command(device, command, expect_string=None, read_timeout=read_timeout)
-        if not output:
-            return None
-
-        # 解析 ARP 表
-        arp_entries = self._parse_arp_table(output, device.vendor)
-        
-        # 添加 device_id 到每个 ARP 条目
-        for arp_entry in arp_entries:
-            arp_entry["device_id"] = device.id
-
-        return arp_entries if arp_entries else None
-
-    async def batch_collect_arp_table(self, devices: List[Device]) -> Dict[str, Any]:
-        """
-        批量采集 ARP 表
-
-        Args:
-            devices: 设备列表
-
-        Returns:
-            采集结果统计
-        """
-        import asyncio
-        
-        tasks = [self.collect_arp_table(device) for device in devices]
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-        
-        success = 0
-        failed = 0
-        details = []
-        
-        for device, result in zip(devices, results):
-            if isinstance(result, Exception):
-                failed += 1
-                details.append({
-                    'device_id': device.id,
-                    'success': False,
-                    'error': str(result)
-                })
-            elif result is not None:
-                success += 1
-                details.append({
-                    'device_id': device.id,
-                    'success': True,
-                    'data': {'arp_table': result}
-                })
-            else:
-                failed += 1
-                details.append({
-                    'device_id': device.id,
-                    'success': False,
-                    'error': 'Empty result'
-                })
-        
-        return {
-            'success': success,
-            'failed': failed,
-            'details': details
-        }
-
     async def collect_mac_table(self, device: Device) -> Optional[List[Dict[str, Any]]]:
         """
         采集设备MAC地址表
@@ -1327,12 +1198,7 @@ class NetmikoService:
         if not mac_command:
             return None
 
-        # 最终方案：使用 expect_string=None，让 Netmiko 自动检测提示符
-        # 保留较长的 read_timeout 以应对网络延迟和大型 MAC 表
-        read_timeout = settings.NETMIKO_MAC_TABLE_TIMEOUT  # MAC表采集可能较慢，使用配置值(默认95s)
-
-        # 使用 expect_string=None，让 Netmiko 自动检测提示符
-        output = await self.execute_command(device, mac_command, expect_string=None, read_timeout=read_timeout)
+        output = await self.execute_command(device, mac_command)
         if not output:
             return None
 
