@@ -76,4 +76,7 @@ asyncioscheduler-refactor/
 ---
 
 **创建日期**: 2026-03-31
-**项目状态**: ⚪ 未开始
+**完成日期**: 2026-03-31
+**项目状态**: ✅ 已完成
+**完成进度**: 100%
+**关联 commit**: 6213f47 feat: ARP/MAC 采集器重构完成 - AsyncIOScheduler 迁移
