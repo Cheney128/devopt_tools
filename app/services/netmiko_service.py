@@ -294,6 +294,104 @@ class NetmikoService:
                 'any_view': r'.*[#>]'
             }
 
+    def _handle_pagination(self, conn, output: str, max_pages: int = 50) -> str:
+        """
+        处理华为/H3C 设备分页输出（同步方法，由异步包装调用）
+
+        修复问题: P009 - 华为 S1730S 设备分页输出导致 ReadTimeout
+
+        Args:
+            conn: Netmiko 连接对象
+            output: 初始输出（包含 ---- More ---- 分页标记）
+            max_pages: 最大分页次数，防止无限循环
+
+        Returns:
+            完整输出（已清理分页标记）
+        """
+        import time
+
+        full_output = output
+
+        # 评审建议 P0: 添加异常处理防止分页异常影响主流程
+        try:
+            for _ in range(max_pages):
+                if '---- More ----' not in full_output:
+                    break
+                # 发送空格继续翻页
+                conn.write_channel(" ")
+                time.sleep(0.3)
+                full_output += conn.read_channel()
+        except Exception as e:
+            # 分页异常时记录警告但返回已获取的输出
+            print(f"[WARNING] Pagination handling error: {e}")
+
+        # 清理分页标记
+        return re.sub(r'\s*---- More ----\s*', '\n', full_output)
+
+    async def _send_command_with_pagination(
+        self,
+        connection,
+        command: str,
+        read_timeout: int = 20,
+        delay_factor: float = 2.0,
+        cleanup_prompt: bool = True
+    ) -> str:
+        """
+        使用 send_command_timing 执行命令并处理分页（异步版本）
+
+        修复问题: P009 - 华为 S1730S 设备 Netmiko ReadTimeout
+
+        技术方案:
+        1. 使用 send_command_timing 绕过提示符检测问题
+        2. 手动处理分页输出（发送空格继续）
+        3. 清理分页标记 ---- More ----
+        4. prompt 状态清理防止后续命令失败
+
+        Args:
+            connection: Netmiko 连接对象
+            command: 要执行的命令
+            read_timeout: 超时时间（秒）
+            delay_factor: 延迟因子，用于 send_command_timing
+            cleanup_prompt: 是否清理 prompt 状态（评审建议 P1 可选化）
+
+        Returns:
+            命令输出（已清理分页标记）
+        """
+        # 评审建议 P1: 日志增强
+        print(f"[INFO] Using send_command_timing for pagination-prone device, command: {command}")
+
+        # 使用 send_command_timing（基于时间判断，不依赖正则匹配）
+        output = await asyncio.get_event_loop().run_in_executor(
+            None,
+            lambda: connection.send_command_timing(
+                command,
+                delay_factor=delay_factor,
+                max_loops=read_timeout * 10  # max_loops = read_timeout * 10
+            )
+        )
+
+        # 分页处理（包装为异步执行，防止阻塞事件循环）
+        if '---- More ----' in output:
+            print(f"[INFO] Pagination detected, handling...")
+            output = await asyncio.get_event_loop().run_in_executor(
+                None,
+                lambda: self._handle_pagination(connection, output)
+            )
+
+        # 评审建议 P0 + P1: prompt 状态清理（可选化 + 异常处理）
+        if cleanup_prompt:
+            try:
+                connection.write_channel("\n")
+                await asyncio.sleep(0.2)
+                await asyncio.get_event_loop().run_in_executor(
+                    None,
+                    lambda: connection.read_channel()
+                )
+            except Exception as e:
+                print(f"[WARNING] Prompt cleanup failed: {e}")
+
+        return output
+
     async def execute_command(self, device: Device, command: str, expect_string: Optional[str] = None, read_timeout: int = 20) -> Optional[str]:
         """
         在设备上执行命令（带增强的错误处理）
@@ -347,9 +445,21 @@ class NetmikoService:
             # 判断是否为配置命令
             is_config_cmd = self._is_config_command(command, device.vendor)
 
+            # 评审建议 P0: 添加分页判断（华为/H3C 查询命令）
+            vendor_lower = device.vendor.lower().strip() if device.vendor else ""
+            needs_pagination = vendor_lower in ['huawei', 'h3c', '华为', '华三']
+
             try:
-                # 如果用户提供了expect_string，使用用户提供的
-                if expect_string:
+                # 评审建议 P0: 分支优先级明确
+                # 优先级：分页查询 > expect_string > 配置命令 > 默认查询
+                if needs_pagination and not is_config_cmd:
+                    # 华为/H3C 查询命令：使用 send_command_timing + 分页处理
+                    print(f"[INFO] Huawei/H3C query command detected, using send_command_timing with pagination")
+                    output = await self._send_command_with_pagination(
+                        connection, command, read_timeout
+                    )
+                elif expect_string:
+                    # 如果用户提供了expect_string，使用用户提供的
                     print(f"[INFO] Sending command with user-provided expect_string: {expect_string}")
                     output = await loop.run_in_executor(
                         None,
@@ -380,7 +490,7 @@ class NetmikoService:
                             )
                         )
                 else:
-                    # 普通查询命令，使用默认方式
+                    # 其他厂商查询命令，使用默认方式
                     print(f"[INFO] Sending command without expect_string (query command)")
                     output = await loop.run_in_executor(
                         None,
