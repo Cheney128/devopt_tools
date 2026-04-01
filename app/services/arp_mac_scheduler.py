@@ -17,6 +17,7 @@ ARP+MAC 批量采集调度器
 
 import asyncio
 import logging
+import re
 import uuid
 from datetime import datetime
 from typing import List, Optional
@@ -34,6 +35,74 @@ from app.services.netmiko_service import get_netmiko_service
 from app.services.ip_location_calculator import get_ip_location_calculator
 
 logger = logging.getLogger(__name__)
+
+# 二次验证正则（标准化后的格式）
+IP_PATTERN = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
+MAC_PATTERN = re.compile(r'^[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}$')
+
+
+def validate_arp_entry(entry: dict) -> bool:
+    """
+    二次验证 ARP 条目数据完整性
+
+    Args:
+        entry: ARP 条目字典
+
+    Returns:
+        True: 数据有效，False: 数据无效
+    """
+    required_fields = ['ip_address', 'mac_address']
+    for field in required_fields:
+        if not entry.get(field):
+            logger.warning(f"[ARP 验证] 缺少必要字段: {field}")
+            return False
+
+    # IP 格式检查
+    if not IP_PATTERN.match(entry['ip_address']):
+        logger.warning(f"[ARP 验证] 无效 IP 格式: {entry['ip_address']}")
+        return False
+
+    # MAC 格式检查（冒号分隔，已标准化）
+    if not MAC_PATTERN.match(entry['mac_address']):
+        logger.warning(f"[ARP 验证] 无效 MAC 格式: {entry['mac_address']}")
+        return False
+
+    return True
+
+
+
+
+def validate_arp_entry(entry: dict) -> bool:
+    """
+    二次验证 ARP 条目数据完整性
+
+    Args:
+        entry: ARP 条目字典
+
+    Returns:
+        True: 数据有效，False: 数据无效
+    """
+    from loguru import logger
+    
+    required_fields = ['ip_address', 'mac_address']
+    for field in required_fields:
+        if not entry.get(field):
+            logger.warning(f"[ARP 验证] 缺少必要字段：{field}")
+            return False
+
+    # IP 格式检查
+    IP_PATTERN = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
+    if not IP_PATTERN.match(entry['ip_address']):
+        logger.warning(f"[ARP 验证] 无效 IP 格式：{entry['ip_address']}")
+        return False
+
+    # MAC 格式检查（冒号分隔，已标准化）
+    MAC_PATTERN = re.compile(r'^[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}:[0-9A-F]{2}$')
+    if not MAC_PATTERN.match(entry['mac_address']):
+        logger.warning(f"[ARP 验证] 无效 MAC 格式：{entry['mac_address']}")
+        return False
+
+    return True
 
 
 class ARPMACScheduler:
@@ -299,7 +368,14 @@ class ARPMACScheduler:
                 batch_id = f"batch_{datetime.now().strftime('%Y%m%d%H%M%S')}_{uuid.uuid4().hex[:8]}"
                 now = datetime.now()
 
-                for entry in arp_table:
+                # 二次数据验证
+                valid_entries = [e for e in arp_table if validate_arp_entry(e)]
+                invalid_count = len(arp_table) - len(valid_entries)
+                if invalid_count > 0:
+                    logger.warning(f"[ARP 采集] 设备 {device.hostname} 过滤无效条目：{invalid_count} 条")
+                logger.info(f"[ARP 采集] 设备 {device.hostname} 有效条目：{len(valid_entries)}/{len(arp_table)}")
+
+                for entry in valid_entries:
                     # 使用 MySQL INSERT ... ON DUPLICATE KEY UPDATE (UPSERT)
                     stmt = mysql_insert(ARPEntry).values(
                         ip_address=entry['ip_address'],

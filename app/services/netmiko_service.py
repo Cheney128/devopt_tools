@@ -654,7 +654,13 @@ class NetmikoService:
 
     def _parse_arp_table(self, output: str, vendor: str) -> List[Dict[str, Any]]:
         """
-        解析 ARP 表输出
+        解析 ARP 表输出（优化版）
+
+        修复问题:
+        1. vendor 大小写处理
+        2. MAC 地址标准化
+        3. IP/MAC 格式验证
+        4. 调试日志
 
         Args:
             output: 命令输出
@@ -663,43 +669,89 @@ class NetmikoService:
         Returns:
             ARP 条目列表
         """
+        from loguru import logger
+
         arp_entries = []
         lines = output.strip().split('\n')
-        
-        # 跳过表头
+
+        # 1. vendor 小写转换
+        vendor_lower = vendor.lower().strip()
+        logger.debug(f"[ARP 解析] vendor={vendor}, vendor_lower={vendor_lower}")
+
+        # 2. 表头识别
         start_index = 0
         for i, line in enumerate(lines):
-            if 'IP' in line and 'MAC' in line:
+            if 'IP' in line.upper() and 'MAC' in line.upper():
                 start_index = i + 1
+                logger.debug(f"[ARP 解析] 表头识别在第 {i} 行：{line.strip()}")
                 break
-        
+
+        # 3. 验证正则
+        IP_PATTERN = re.compile(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$')
+        MAC_PATTERN = re.compile(r'^[0-9A-Fa-f]{2}([-:.]?[0-9A-Fa-f]{2}){5}$')
+
+        # 4. 数据行解析
         for line in lines[start_index:]:
             if not line.strip():
                 continue
-            
+            if '---' in line or 'Total:' in line or 'Type:' in line:
+                continue
+
             parts = line.split()
-            if len(parts) >= 4:
-                try:
-                    if vendor in ['huawei', 'h3c']:
-                        # 华为/H3C 格式：IP 地址  MAC 地址     VLAN  接口
-                        entry = {
-                            'ip_address': parts[0],
-                            'mac_address': parts[1].upper(),
-                            'vlan_id': int(parts[2]) if parts[2].isdigit() else None,
-                            'interface': parts[3] if len(parts) > 3 else None
-                        }
-                    else:  # cisco
-                        # Cisco 格式：Protocol  Address  Age  MAC Addr  Interface
-                        entry = {
-                            'ip_address': parts[1],
-                            'mac_address': parts[3].upper(),
-                            'vlan_id': None,
-                            'interface': parts[4] if len(parts) > 4 else None
-                        }
-                    arp_entries.append(entry)
-                except (ValueError, IndexError):
-                    continue
-        
+            if len(parts) < 4:
+                logger.warning(f"[ARP 解析] 行字段不足：{line.strip()}")
+                continue
+
+            try:
+                if vendor_lower in ['huawei', 'h3c']:
+                    # Huawei/H3C 格式：IP MAC VLAN Interface [Aging] [Type]
+                    ip = parts[0]
+                    mac_raw = parts[1]
+                    vlan = parts[2] if parts[2].isdigit() else None
+                    interface = parts[3]
+
+                    # 数据验证
+                    if not IP_PATTERN.match(ip):
+                        logger.warning(f"[ARP 解析] 无效 IP: {ip}, 跳过")
+                        continue
+                    if not MAC_PATTERN.match(mac_raw):
+                        logger.warning(f"[ARP 解析] 无效 MAC: {mac_raw}, 跳过")
+                        continue
+
+                    entry = {
+                        'ip_address': ip,
+                        'mac_address': self._normalize_mac_address(mac_raw),
+                        'vlan_id': int(vlan) if vlan else None,
+                        'interface': interface
+                    }
+                else:  # cisco
+                    # Cisco 格式：Protocol IP Age MAC Addr Type Interface
+                    ip = parts[1]
+                    mac_raw = parts[3]
+
+                    # 数据验证
+                    if not IP_PATTERN.match(ip):
+                        logger.warning(f"[ARP 解析] 无效 IP: {ip}, 跳过")
+                        continue
+                    if not MAC_PATTERN.match(mac_raw):
+                        logger.warning(f"[ARP 解析] 无效 MAC: {mac_raw}, 跳过")
+                        continue
+
+                    entry = {
+                        'ip_address': ip,
+                        'mac_address': self._normalize_mac_address(mac_raw),
+                        'vlan_id': None,
+                        'interface': parts[5] if len(parts) > 5 else parts[4]
+                    }
+
+                arp_entries.append(entry)
+                logger.debug(f"[ARP 解析] 成功解析：IP={entry['ip_address']}, MAC={entry['mac_address']}")
+
+            except (ValueError, IndexError) as e:
+                logger.warning(f"[ARP 解析] 解析失败：{line.strip()}, error={e}")
+                continue
+
+        logger.info(f"[ARP 解析] vendor={vendor_lower}, 共解析 {len(arp_entries)} 条有效记录")
         return arp_entries
 
     def parse_mac_table(self, output: str, vendor: str) -> List[Dict[str, Any]]:
@@ -817,24 +869,27 @@ class NetmikoService:
 
     def _normalize_mac_address(self, mac: str) -> str:
         """
-        标准化MAC地址格式为 xx:xx:xx:xx:xx:xx
-        保留原始格式（Cisco用点分隔，华为用横线分隔）
+        标准化 MAC 地址为冒号分隔格式 (xx:xx:xx:xx:xx:xx)
+
+        支持输入格式:
+        - xxxx-xxxx-xxxx (Huawei/H3C)
+        - xxxx.xxxx.xxxx (Cisco)
+        - xx:xx:xx:xx:xx:xx (标准格式)
 
         Args:
-            mac: 原始MAC地址字符串
+            mac: 原始 MAC 地址字符串
 
         Returns:
-            标准化后的MAC地址
+            标准化后的 MAC 地址 (xx:xx:xx:xx:xx:xx)
         """
-        # 移除所有分隔符并转为大写
+        from loguru import logger
+
         mac_clean = re.sub(r'[^0-9A-Fa-f]', '', mac.upper())
+        if len(mac_clean) != 12:
+            logger.warning(f'[MAC 标准化] 无效 MAC: {mac}')
+            return mac.upper()
+        return ':'.join([mac_clean[i:i+2] for i in range(0, 12, 2)])
 
-        # 如果已经是12位十六进制，保持原始格式（添加原始分隔符）
-        if len(mac_clean) == 12:
-            return mac
-
-        # 如果格式不正确，尝试添加冒号分隔符
-        return mac
 
     def parse_interfaces_info(self, interfaces_output: str, status_output: Optional[str], vendor: str) -> List[Dict[str, Any]]:
         """
